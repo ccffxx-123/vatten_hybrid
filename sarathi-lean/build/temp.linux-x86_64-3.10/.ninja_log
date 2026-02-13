@@ -1,0 +1,9 @@
+# ninja log v7
+0	33687	1766994398992489185	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/pos_encoding.o	39aa447d2cc80d6d
+0	82890	1766994398992489185	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/pos_encoding_kernels.o	944cdf320562983d
+3	33490	1766994482647054288	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/layernorm.o	e97467cb12e39427
+4	78189	1766994482647054288	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/layernorm_kernels.o	f36faf98e0dd5ae
+3	32457	1766994561617703310	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/activation.o	4fbbd18a66a8f4a3
+3	77883	1766994561617703310	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/activation_kernels.o	1865d04746e14179
+3	33975	1766994640248361099	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache.o	d59a5b30f2ef25e8
+3	85413	1766994640248361099	/workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache_kernels.o	2dae5851fd652398

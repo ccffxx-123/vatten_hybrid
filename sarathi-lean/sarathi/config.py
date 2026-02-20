@@ -65,6 +65,9 @@ class ModelConfig:
         revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         attention_backend: Optional[str] = None,
+        # ---- hybrid override params (None = read from hf_config) ----
+        override_window_size: Optional[int] = None,
+        override_d_state: Optional[int] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -187,6 +190,201 @@ class ModelConfig:
 
     def get_total_num_layers(self) -> int:
         return self.hf_config.num_hidden_layers
+    
+    # ==================================================================
+    # Hybrid architecture helpers  (NEW)
+    # ==================================================================
+
+    def get_d_state(self) -> int:
+        """Return the Mamba SSM state dimension.
+
+        Lookup order:
+          1. Constructor override  (``override_d_state``)
+          2. ``hf_config.ssm_state_size``   (Jamba-style)
+          3. ``hf_config.state_size``
+          4. ``hf_config.d_state``           (Mamba-1/2 style)
+          5. Default 0 – no Mamba layers present
+
+        Returns 0 when the model has no Mamba/state layers so the caller
+        can safely pass the value to hybrid vAttention without branching.
+        """
+        if self._override_d_state is not None:
+            return self._override_d_state
+
+        for key in ("ssm_state_size", "state_size", "d_state"):
+            val = getattr(self.hf_config, key, None)
+            if val is not None:
+                return int(val)
+
+        return 0
+
+    def get_window_size(self) -> int:
+        """Return the sliding-window attention (SWA) window size.
+
+        Lookup order:
+          1. Constructor override  (``override_window_size``)
+          2. ``hf_config.sliding_window``         (Mistral / Jamba)
+          3. ``hf_config.attention_window_size``
+          4. Default 0 – no SWA layers present
+
+        A return value of 0 means the model does not use sliding-window
+        attention for any of its layers.
+        """
+        if self._override_window_size is not None:
+            return self._override_window_size
+
+        for key in ("sliding_window", "attention_window_size"):
+            val = getattr(self.hf_config, key, None)
+            if val is not None:
+                return int(val)
+
+        return 0
+
+    def get_num_layers_by_type(self) -> Tuple[int, int, int]:
+        """Classify every hidden layer and return *(trans, swa, state)* counts.
+
+        The classification is model-family specific.  We support the
+        following conventions found in popular HuggingFace configs:
+
+        1. **``layers_block_type``** – an explicit per-layer list, e.g.
+           Jamba uses ``["transformer", "transformer", "mamba", ...]``.
+           Recognised labels:
+             * full / transformer / attention  → *trans*  (full attention)
+             * sliding_window / swa            → *swa*
+             * mamba / state / ssm             → *state*
+
+        2. **``attn_layer_period`` + ``attn_layer_offset``** – a periodic
+           pattern where layer *i* is attention iff
+           ``(i - offset) % period == 0`` and otherwise Mamba.
+           Within the attention layers we further check
+           ``sliding_window`` to split trans / swa.
+
+        3. **Fallback** – if none of the above fields exist the model is
+           assumed to be a *pure transformer*.  All layers are *trans* if
+           ``get_window_size() == 0``, otherwise all layers are *swa*.
+
+        Returns:
+            ``(num_layers_trans, num_layers_swa, num_layers_state)``
+        """
+        total = self.hf_config.num_hidden_layers
+
+        # ---- Strategy 1: explicit per-layer list ----
+        block_types = getattr(self.hf_config, "layers_block_type", None)
+        if block_types is not None:
+            assert len(block_types) == total, (
+                f"layers_block_type length ({len(block_types)}) "
+                f"!= num_hidden_layers ({total})"
+            )
+            _TRANS = {"full", "transformer", "attention"}
+            _SWA   = {"sliding_window", "swa"}
+            _STATE = {"mamba", "state", "ssm", "recurrent"}
+
+            n_trans = n_swa = n_state = 0
+            for t in block_types:
+                t_lower = t.lower()
+                if t_lower in _TRANS:
+                    n_trans += 1
+                elif t_lower in _SWA:
+                    n_swa += 1
+                elif t_lower in _STATE:
+                    n_state += 1
+                else:
+                    raise ValueError(
+                        f"Unknown block type '{t}' in layers_block_type. "
+                        f"Expected one of {_TRANS | _SWA | _STATE}."
+                    )
+            return (n_trans, n_swa, n_state)
+
+        # ---- Strategy 2: periodic pattern (Jamba-v1 style) ----
+        period = getattr(self.hf_config, "attn_layer_period", None)
+        offset = getattr(self.hf_config, "attn_layer_offset", 0)
+        if period is not None:
+            has_swa = self.get_window_size() > 0
+            n_attn = sum(
+                1 for i in range(total) if (i - offset) % period == 0
+            )
+            n_state = total - n_attn
+            if has_swa:
+                # All attention layers are SWA in this convention
+                return (0, n_attn, n_state)
+            else:
+                return (n_attn, 0, n_state)
+
+        # ---- Strategy 3: fallback – pure transformer ----
+        if self.get_window_size() > 0:
+            # All layers use sliding-window attention (e.g. Mistral)
+            return (0, total, 0)
+        else:
+            # Standard full-attention model (e.g. LLaMA)
+            return (total, 0, 0)
+
+    def get_layer_type_list(self) -> List[str]:
+        """Return a per-layer type tag in **original layer order**.
+
+        Each element is one of ``"trans"``, ``"swa"``, or ``"state"``.
+        The list length equals ``hf_config.num_hidden_layers``.
+
+        This is the ordered companion of :meth:`get_num_layers_by_type`
+        and is used by the cache engine to slice the 5 bulk tensors
+        returned by hybrid ``vattention.init_kvcache`` back into the
+        per-layer ``kv_caches[layer_id]`` list that the model forward
+        pass indexes.
+
+        Detection strategies mirror :meth:`get_num_layers_by_type`:
+
+        1. Explicit ``layers_block_type`` list  (Jamba-style)
+        2. Periodic ``attn_layer_period / attn_layer_offset`` pattern
+        3. Fallback – pure transformer or pure SWA
+        """
+        total = self.hf_config.num_hidden_layers
+
+        _TRANS = {"full", "transformer", "attention"}
+        _SWA   = {"sliding_window", "swa"}
+        _STATE = {"mamba", "state", "ssm", "recurrent"}
+
+        # ---- Strategy 1: explicit per-layer list ----
+        block_types = getattr(self.hf_config, "layers_block_type", None)
+        if block_types is not None:
+            assert len(block_types) == total, (
+                f"layers_block_type length ({len(block_types)}) "
+                f"!= num_hidden_layers ({total})"
+            )
+            result: List[str] = []
+            for t in block_types:
+                t_lower = t.lower()
+                if t_lower in _TRANS:
+                    result.append("trans")
+                elif t_lower in _SWA:
+                    result.append("swa")
+                elif t_lower in _STATE:
+                    result.append("state")
+                else:
+                    raise ValueError(
+                        f"Unknown block type '{t}' in layers_block_type. "
+                        f"Expected one of {_TRANS | _SWA | _STATE}."
+                    )
+            return result
+
+        # ---- Strategy 2: periodic pattern (Jamba-v1 style) ----
+        period = getattr(self.hf_config, "attn_layer_period", None)
+        offset = getattr(self.hf_config, "attn_layer_offset", 0)
+        if period is not None:
+            has_swa = self.get_window_size() > 0
+            attn_tag = "swa" if has_swa else "trans"
+            return [
+                attn_tag if (i - offset) % period == 0 else "state"
+                for i in range(total)
+            ]
+
+        # ---- Strategy 3: fallback – uniform model ----
+        if self.get_window_size() > 0:
+            return ["swa"] * total
+        return ["trans"] * total
+
+    def is_hybrid_model(self) -> bool:
+        """Return True if the model mixes more than one layer type."""
+        counts = self.get_num_layers_by_type()
+        return sum(1 for c in counts if c > 0) > 1
 
 
 class CacheConfig:

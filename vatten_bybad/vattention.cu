@@ -255,18 +255,21 @@ public:
     // 从后释放请求的部分 KV 块，直到只剩下 retain_blocks 个块
     inline void release_kvcache_pages_some_trans(int reqId, u64 retain_blocks_trans)
     {
+        if(num_layers_trans == 0) return;
         while (get_req_pages_trans(reqId) > retain_blocks_trans)
             unmap_req_page_one_trans(reqId);
     }
 
     inline void release_kvcache_pages_some_swa(int reqId, u64 retain_blocks_swa)
     {
+        if(num_layers_swa == 0) return;
         while (get_req_pages_swa(reqId) > retain_blocks_swa)
             unmap_req_page_one_swa(reqId);
     }
 
     inline void release_kvcache_pages_some_state(int reqId, u64 retain_blocks_swa)
     {
+        if(num_layers_state == 0) return;
         u64 req_offset;
         req_offset = get_req_current_offset_state(reqId, true); // 起始地址
         u64 num_page = get_req_pages_state(reqId);
@@ -430,11 +433,11 @@ public:
         if (nr_required_trans <= nr_mapped_trans && nr_required_swa <= nr_mapped_swa && nr_required_state <= nr_mapped_state)
             return;
 
-        nr_required_trans -= nr_mapped_trans;
-        nr_required_swa -= nr_mapped_swa;    // 总共需要的页数
+        nr_required_trans = nr_required_trans > nr_mapped_trans ? nr_required_trans - nr_mapped_trans : 0;
+        nr_required_swa = nr_required_swa > nr_mapped_swa ? nr_required_swa - nr_mapped_swa : 0;    // 总共需要的页数
         //需要映射的物理页（第一个窗口）
         nr_required_swa_pysical = nr_required_swa_pysical > nr_mapped_swa ? nr_required_swa_pysical - nr_mapped_swa : 0;
-        nr_required_state -= nr_mapped_state;
+        nr_required_state = nr_required_state > nr_mapped_state ? nr_required_state - nr_mapped_state : 0;
 
         u64 nr_required = nr_required_trans * 2 + nr_required_swa_pysical * 2 + nr_required_state;
         if (!kvblocks_available(nr_required))

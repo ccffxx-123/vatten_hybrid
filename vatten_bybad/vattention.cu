@@ -106,8 +106,10 @@ public:
         assert(num_kv_heads_ > 0 && num_kv_heads_ < 256);
 
         // 如果为0传入任意一个数（比如1）
-        for(int i = 0; i < num_layers_.size(); i++)
-            assert(num_layers_[i] > 0 && num_layers_[i] < 100);
+        for(int i = 0; i < num_layers_.size(); i++) {
+            assert(num_layers_[i] >= 0 && num_layers_[i] < 100); 
+        }
+        assert(num_layers_[0] > 0 || num_layers_[1] > 0 || num_layers_[2] > 0);
         num_layers_trans = num_layers_[0];
         num_layers_swa = num_layers_[1];
         num_layers_state = num_layers_[2];

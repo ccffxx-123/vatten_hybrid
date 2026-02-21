@@ -43,8 +43,7 @@ at::Tensor tensors_state;
 std::atomic<bool> mem_manager_running(false);
 
 int num_kv_heads;      
-int head_size;         
-int num_layers;        
+int head_size;            
 int bytes_per_elem;    
 int device;            
 py::object dtype;      
@@ -116,7 +115,7 @@ inline u64 tokens_to_pages_swa(u64 num_tokens)
 }
 inline u64 tokens_to_pages_state(u64 num_tokens)
 {
-    if (virt_buff_size_per_req_state == 0) return 0; 
+    if (virt_buff_size_per_req_state == 0 || num_tokens == 0) return 0; 
     return (virt_buff_size_per_req_state + page_size - 1) / page_size;
 }
 

@@ -267,7 +267,7 @@ public:
             unmap_req_page_one_swa(reqId);
     }
 
-    inline void release_kvcache_pages_some_state(int reqId, u64 retain_blocks_swa)
+    inline void release_kvcache_pages_some_state(int reqId)
     {
         if(num_layers_state == 0) return;
         u64 req_offset;
@@ -287,7 +287,7 @@ public:
     inline void release_kvcache_pages_all(int reqId)
     {
         release_kvcache_pages_some_trans(reqId, 0);
-        release_kvcache_pages_some_state(reqId, 0);
+        release_kvcache_pages_some_state(reqId);
         set_req_pages_swa(reqId, std::min(get_req_pages_swa(reqId), virt_buff_size_per_windows / page_size));
         release_kvcache_pages_some_swa(reqId, 0);
     }
@@ -390,7 +390,7 @@ public:
             release_kvcache_pages_some_trans(reqId, nr_required);
 
             if(!is_active_req(reqId))
-                release_kvcache_pages_some_state(reqId, 0);
+                release_kvcache_pages_some_state(reqId);
         }
 
         if (kvblocks_available(num_kvblocks))
@@ -482,7 +482,6 @@ public:
             }
         }
 
-        bool ummap_trans = false;
         // 先考虑transfomer层，再考虑swa
         // 从后往前找到第一个长度为0但是还占用物理页的请求，释放它的一个物理页（忽略从前往后第一个长度为0的请求（可能用于下一个请求））
         for (int reqId = max_batch_size - 1; reqId >= 0; reqId--)
@@ -492,12 +491,8 @@ public:
             if (get_req_pages_trans(reqId) == 0)
                 continue;
             unmap_req_page_one_trans(reqId);
-            ummap_trans = true;
-            break;
-        }
-
-        if(ummap_trans)
             return;
+        }   
 
         for (int reqId = max_batch_size - 1; reqId >= 0; reqId--)
         {
@@ -507,7 +502,21 @@ public:
                 continue;
             set_req_pages_swa(reqId, std::min(get_req_pages_swa(reqId), virt_buff_size_per_windows / page_size));
             unmap_req_page_one_swa(reqId);
-            break;
+            return;
+        }
+
+        // deferred_reclaim=false 时，非活跃请求的 state 页永远不会被后台线程逐步回收，
+        // 只有在 reclaim_kvblocks_on_demand（OOM 压力下）或 release_kvcache_pages_all（请求完全清理时）才会释放。
+        // 如果场景中 state 占比较大，这可能导致内存回收不及时。
+        // 在 do_reclaim_pages 末尾，trans 和 swa 都没得释放时，再处理 state
+        for (int reqId = max_batch_size - 1; reqId >= 0; reqId--)
+        {
+            if (is_active_req(reqId) || reqId == next_prefill_reqId)
+                continue;
+            if (get_req_pages_state(reqId) == 0)
+                continue;
+            release_kvcache_pages_some_state(reqId);  // 一次性全释放该请求的state
+            break;  // 仍然保持每次只处理一个请求的节奏
         }
     }
 

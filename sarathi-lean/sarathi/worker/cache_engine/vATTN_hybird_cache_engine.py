@@ -321,14 +321,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         # Per-token KV cost for one layer (K + V)
         kv_per_token_per_layer = 2 * num_heads * head_size * dtype_size
 
-        if hasattr(model_config, "get_num_layers_by_type") and callable(
-            model_config.get_num_layers_by_type
-        ):
-            n_trans, n_swa, n_state = model_config.get_num_layers_by_type()
-        else:
-            n_trans = model_config.get_num_layers(parallel_config)
-            n_swa = 0
-            n_state = 0
+        n_trans, n_swa, n_state = model_config.get_num_layers_by_type()
 
         # Transformer + SWA: token-proportional
         attn_layers = n_trans + n_swa

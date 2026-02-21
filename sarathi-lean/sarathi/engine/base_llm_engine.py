@@ -25,9 +25,10 @@ from sarathi.metrics.metrics_store import MetricsStore
 from sarathi.transformers_utils.tokenizer import get_tokenizer
 from sarathi.utils import Counter, get_ip, get_random_port, unset_cuda_visible_devices
 from sarathi.model_executor.attention import AttentionBackend
-from sarathi.core.block_space_manager.vattention_block_space_manager import (
-    vAttentionBlockSpaceManager
-)
+# from sarathi.core.block_space_manager.vattention_block_space_manager import (
+#     vAttentionBlockSpaceManager
+# )
+from sarathi.core.block_space_manager.vattention_hybird_block_space_manager import vAttentionBlockSpaceManager
 
 logger = init_logger(__name__)
 
@@ -129,7 +130,7 @@ class BaseLLMEngine:
         self.scheduler = SchedulerRegistry.get(
             scheduler_config.type, scheduler_config, cache_config
         )
-        self.scheduler.set_block_manager(model_config)
+        self.scheduler.set_block_manager(model_config, parallel_config)
         
 
         self._scheduler_timer = CpuTimer(CpuOperationMetrics.SCHEDULE)

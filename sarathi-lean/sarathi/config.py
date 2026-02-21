@@ -79,6 +79,10 @@ class ModelConfig:
         self.revision = revision
         self.attention_backend = attention_backend
 
+        # Optional overrides – only used when hf_config lacks the field
+        self._override_window_size = override_window_size
+        self._override_d_state = override_d_state
+
         self.hf_config = get_config(model, trust_remote_code, revision)
 
         # support fschat to load model which uses dynamic ntk (e.g Qwen)
@@ -91,6 +95,7 @@ class ModelConfig:
         self.max_model_len = _get_and_verify_max_len(self.hf_config, max_model_len)
         self._verify_load_format()
         self._verify_tokenizer_mode()
+
 
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()

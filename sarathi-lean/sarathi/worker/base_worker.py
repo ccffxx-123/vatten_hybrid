@@ -148,6 +148,7 @@ class BaseWorker:
             self.cache_config,
             self.scheduler_config,
             self.model_config,
+            self.parallel_config,
         )
         # return self.cache_engine
     def get_free_blocks(self) -> int:

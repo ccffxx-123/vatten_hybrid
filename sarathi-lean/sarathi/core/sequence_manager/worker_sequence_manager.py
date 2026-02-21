@@ -1,6 +1,6 @@
 from typing import List
 
-from sarathi.config import BaseSchedulerConfig, CacheConfig, ModelConfig
+from sarathi.config import BaseSchedulerConfig, CacheConfig, ModelConfig, ParallelConfig
 from sarathi.core.block_space_manager.block_space_manager_registry import (
     BlockSpaceManagerRegistry,
 )
@@ -17,6 +17,7 @@ class WorkerSequenceManager(BaseSequenceManager):
         cache_config: CacheConfig,
         scheduler_config: BaseSchedulerConfig,
         model_config: ModelConfig,
+        parallel_config: ParallelConfig,
     ):
         super().__init__()
         # we will have a clone of block manager here, it is supposed
@@ -26,6 +27,8 @@ class WorkerSequenceManager(BaseSequenceManager):
                 self.block_manager = vAttentionBlockSpaceManager(
                     cache_config.block_size,
                     cache_config.num_gpu_blocks,
+                    model_config,
+                    parallel_config,
                     scheduler_config.max_model_len,
                 )
         else:

@@ -7,7 +7,9 @@ KVCache = Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]
 
 def get_cache_engine(attn_backend: str):
     if AttentionBackend.is_vATTN(attn_backend):
-        from sarathi.worker.cache_engine.vATTN_cache_engine import vATTNCacheEngine
+        # from sarathi.worker.cache_engine.vATTN_cache_engine import vATTNCacheEngine
+        # return vATTNCacheEngine
+        from sarathi.worker.cache_engine.vATTN_hybird_cache_engine import vATTNCacheEngine
         return vATTNCacheEngine
     elif AttentionBackend.is_vLLM(attn_backend):
         from sarathi.worker.cache_engine.vLLM_cache_engine import vLLMCacheEngine

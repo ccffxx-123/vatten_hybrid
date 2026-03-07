@@ -136,19 +136,16 @@ class ModelRunner:
         max_num_seqs = self.scheduler_config.max_num_seqs
 
         seq_metadata_list: List[SequenceMetadata] = []
+   
+        # Profile memory usage with max_num_sequences sequences and the total
+        # number of tokens equal to max_num_batched_tokens.
+        for seq_id in range(max_num_seqs):
+            seq_len = max_num_batched_tokens // max_num_seqs + (
+                seq_id < max_num_batched_tokens % max_num_seqs
+            )
 
-        if (
-            self.scheduler_config.type == SchedulerType.SARATHI
-            or self.scheduler_config.type == SchedulerType.SIMPLE_CHUNKING
-        ):
-            # Profile memory usage with a single `chunk_size` chunk
-            # which is the last chunk in the longest supported sequence.
-            chunk_size = self.scheduler_config.chunk_size
-            seq_len = self.model_config.get_max_model_len()
-            chunk_size = min(chunk_size, seq_len)
-            
             seq = Sequence(
-                seq_id=0,
+                seq_id=seq_id,
                 prompt=None,
                 prompt_token_ids=[0] * seq_len,
                 block_size=block_size,
@@ -156,37 +153,12 @@ class ModelRunner:
                 arrival_time=None,
                 sampling_params=sampling_params,
             )
-            
             seq_metadata = SequenceMetadata(
                 seq=seq,
                 block_table=None,
-                prompt_chunk_len=chunk_size,
+                prompt_chunk_len=seq_len,
             )
             seq_metadata_list.append(seq_metadata)
-            
-        else:
-            # Profile memory usage with max_num_sequences sequences and the total
-            # number of tokens equal to max_num_batched_tokens.
-            for seq_id in range(max_num_seqs):
-                seq_len = max_num_batched_tokens // max_num_seqs + (
-                    seq_id < max_num_batched_tokens % max_num_seqs
-                )
-
-                seq = Sequence(
-                    seq_id=seq_id,
-                    prompt=None,
-                    prompt_token_ids=[0] * seq_len,
-                    block_size=block_size,
-                    eos_token_id=1,
-                    arrival_time=None,
-                    sampling_params=sampling_params,
-                )
-                seq_metadata = SequenceMetadata(
-                    seq=seq,
-                    block_table=None,
-                    prompt_chunk_len=seq_len,
-                )
-                seq_metadata_list.append(seq_metadata)
 
         input_tokens, input_positions = self._prepare_inputs(seq_metadata_list)
         get_attention_wrapper().begin_forward(seq_metadata_list)

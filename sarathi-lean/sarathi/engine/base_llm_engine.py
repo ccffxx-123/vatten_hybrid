@@ -131,7 +131,6 @@ class BaseLLMEngine:
             scheduler_config.type, scheduler_config, cache_config
         )
         self.scheduler.set_block_manager(model_config, parallel_config)
-        
 
         self._scheduler_timer = CpuTimer(CpuOperationMetrics.SCHEDULE)
         self._process_model_outputs_timer = CpuTimer(
@@ -242,7 +241,6 @@ class BaseLLMEngine:
             block_size=self.cache_config.block_size,
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
         )
-        
         # exit(0)
         num_gpu_blocks_across_workers, physical_memory_all = map(list, zip(*output_all))
 
@@ -508,3 +506,6 @@ class BaseLLMEngine:
 
     def cleanup(self) -> None:
         self._run_workers("cleanup")
+
+    def show_allocator_state(self) -> None:
+        self._run_workers("show_allocator_state")

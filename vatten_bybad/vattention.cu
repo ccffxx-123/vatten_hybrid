@@ -53,6 +53,7 @@ public:
 
         //state
         // virt_buff_size_per_req_state = hidden_size * d_state * num_layers_state * bytes_per_elem;
+        // virt_buff_size_state = ROUND_UP(virt_buff_size_per_req_state * max_batch_size);
         virt_buff_size_per_req_state = ROUND_UP(hidden_size * d_state * num_layers_state * bytes_per_elem, page_size);
         virt_buff_size_state = virt_buff_size_per_req_state * max_batch_size;
 
@@ -68,24 +69,79 @@ public:
     }
     
 
+    // inline void show_allocator_state()
+    // {
+    //     std::stringstream ss;
+    //     u64 nr_pages = cuda_pages.size();
+    //     log.log("Free pool: " + std::to_string(PAGES_TO_KVBLOCKS(nr_pages)) + " KV blocks");
+
+    //     log.log("reqId : seqlen: mapped: required");
+    //     for (int i = 0; i < max_batch_size; i++)
+    //     {
+    //         ss.str(std::string());
+    //         ss << std::setw(8) << i << ": "
+    //            << std::setw(8) << get_req_seq_length(i) << " : "
+    //            << std::setw(8) << mapped_pages_trans[i] << " : "
+    //            << std::setw(8) << mapped_pages_swa[i] << " : "
+    //            << std::setw(8) << mapped_pages_state[i] << " : ";
+    //         //    << std::setw(8) << tokens_to_pages(get_req_seq_length(i));
+    //         log.log(ss.str());
+    //     }
+    // }
+
     inline void show_allocator_state()
     {
         std::stringstream ss;
-        u64 nr_pages = cuda_pages.size();
-        log.log("Free pool: " + std::to_string(PAGES_TO_KVBLOCKS(nr_pages)) + " KV blocks");
+        u64 nr_pages_in_pool = cuda_pages.size();
+        u64 total_free_kvblocks = get_num_free_kvblocks(); 
 
-        log.log("reqId : seqlen: mapped: required");
+        log.log("==================== vHybrid Allocator State ====================");
+        log.log("Global Physical Memory Pool:");
+        // 打印原始空闲物理页数量及大致对应的 MB 数
+        log.log("  Raw Free Pages : " + std::to_string(nr_pages_in_pool) + " pages (" + std::to_string(nr_pages_in_pool * page_size / MB) + " MB)");
+        // 打印系统综合计算的空闲 KV blocks
+        log.log("  Free KV Blocks : " + std::to_string(total_free_kvblocks) + " blocks");
+        // 打印 SWA 窗口的物理页上限阈值，方便对比是否超出
+        log.log("  SWA Window Cap : " + std::to_string(virt_buff_size_per_windows / page_size) + " pages max per request");
+        log.log("-----------------------------------------------------------------");
+        
+        // 打印精致对齐的表头
+        ss.str("");
+        ss << std::left 
+           << std::setw(6)  << "reqId" << " | "
+           << std::setw(8)  << "seq_len" << " | "
+           << std::setw(15) << "Trans(Map/Req)" << " | "
+           << std::setw(20) << "SWA(Map/LogReq/PhyReq)" << " | "
+           << std::setw(14) << "State(Map/Req)";
+        log.log(ss.str());
+        log.log("-----------------------------------------------------------------");
+
         for (int i = 0; i < max_batch_size; i++)
         {
+            u64 seq_len = get_req_seq_length(i);
+            
+            // 计算各项所需的理论页数
+            u64 req_trans = tokens_to_pages_trans(seq_len) * 2;
+            u64 req_swa_logical = tokens_to_pages_swa(seq_len) * 2; // 如果不加限制，逻辑上需要的页数
+            u64 req_swa_physical = tokens_to_pages_swa(std::min(seq_len, windows_size)) * 2; // 环形缓冲区下，实际物理需要的页数
+            u64 req_state = tokens_to_pages_state(seq_len);
+
+            // 获取当前实际映射的物理页数
+            u64 map_trans = mapped_pages_trans[i] * 2;
+            u64 map_swa = mapped_pages_swa[i] * 2;   // 逻辑的映射页数
+            u64 map_state = mapped_pages_state[i];
+
+            // 格式化输出每一行
             ss.str(std::string());
-            ss << std::setw(8) << i << ": "
-               << std::setw(8) << get_req_seq_length(i) << " : "
-               << std::setw(8) << mapped_pages_trans[i] << " : "
-               << std::setw(8) << mapped_pages_swa[i] << " : "
-               << std::setw(8) << mapped_pages_state[i] << " : ";
-            //    << std::setw(8) << tokens_to_pages(get_req_seq_length(i));
+            ss << std::left 
+               << std::setw(6) << i << " | "
+               << std::setw(8) << seq_len << " | "
+               << std::setw(6) << map_trans << "/" << std::setw(8) << req_trans << " | "
+               << std::setw(5) << map_swa << "/" << std::setw(6) << req_swa_logical << "/" << std::setw(7) << req_swa_physical << " | "
+               << std::setw(5) << map_state << "/" << std::setw(8) << req_state;
             log.log(ss.str());
         }
+        log.log("=================================================================");
     }
 
 
@@ -203,7 +259,7 @@ public:
         for (int reqId = 0; reqId < max_batch_size; reqId++) {
             // Trans and SWA have K+V (2 pages each), State has 1 page
             int64_t excess_trans = (int64_t)mapped_pages_trans[reqId] - (int64_t)tokens_to_pages_trans(get_req_seq_length(reqId));
-            int64_t excess_swa = (int64_t)mapped_pages_swa[reqId] - (int64_t)tokens_to_pages_swa(get_req_seq_length(reqId));
+            int64_t excess_swa = (int64_t)min(mapped_pages_swa[reqId], virt_buff_size_per_windows / page_size) - (int64_t)min(tokens_to_pages_swa(get_req_seq_length(reqId)), virt_buff_size_per_windows / page_size);
             int64_t excess_state = (int64_t)mapped_pages_state[reqId] - (int64_t)tokens_to_pages_state(get_req_seq_length(reqId));
             
             if (excess_trans > 0) free_kvblocks += (u64)excess_trans * 2;  // K + V
@@ -424,9 +480,11 @@ public:
     {
         u64 nr_required_trans = tokens_to_pages_trans(seq_len);
         u64 nr_mapped_trans = get_req_pages_trans(reqId);
-        u64 nr_required_swa = tokens_to_pages_swa(seq_len);  
-        u64 nr_required_swa_pysical = tokens_to_pages_swa(std::min(seq_len, windows_size));
+
+        u64 nr_required_swa = tokens_to_pages_swa(seq_len);  // 逻辑上需要多少（可能包含重复）
+        u64 nr_required_swa_pysical = tokens_to_pages_swa(std::min(seq_len, windows_size)); //实际上需要（物理上）
         u64 nr_mapped_swa = get_req_pages_swa(reqId);  // 从起始连续的最大页面数（包括重复的）
+
         u64 nr_required_state = tokens_to_pages_state(seq_len);
         u64 nr_mapped_state = get_req_pages_state(reqId);
 
@@ -434,7 +492,7 @@ public:
             return;
 
         nr_required_trans = nr_required_trans > nr_mapped_trans ? nr_required_trans - nr_mapped_trans : 0;
-        nr_required_swa = nr_required_swa > nr_mapped_swa ? nr_required_swa - nr_mapped_swa : 0;    // 总共需要的页数
+        nr_required_swa = nr_required_swa > nr_mapped_swa ? nr_required_swa - nr_mapped_swa : 0;    // 逻辑上还需要的页数
         //需要映射的物理页（第一个窗口）
         nr_required_swa_pysical = nr_required_swa_pysical > nr_mapped_swa ? nr_required_swa_pysical - nr_mapped_swa : 0;
         nr_required_state = nr_required_state > nr_mapped_state ? nr_required_state - nr_mapped_state : 0;
@@ -445,6 +503,8 @@ public:
 
         /* this should not get triggered frequently with our optimizations */
         log.log("[DEBUG] allocating " + std::to_string(nr_required) + " pages for reqId: " + std::to_string(reqId));
+        
+        nr_required = nr_required_trans * 2 + nr_required_swa * 2 + nr_required_state;
         grow_kvcache_phys(reqId, nr_required, nr_required_trans, nr_required_swa, nr_required_state, true);
         set_req_seq_length(reqId, seq_len);
     }
@@ -675,15 +735,16 @@ public:
     /* TODO(ashish): check if this is compatible with PyTorch destructor */
     void cleanup()
     {
+        show_allocator_state();
         wait_kvcache_manager_sync();
         for (int reqId = 0; reqId < max_batch_size; reqId++)
             release_kvcache_pages_all(reqId);
         do_kvcache_cleanup_all();
-        k_tensors_trans.clear();
-        v_tensors_trans.clear();
-        k_tensors_swa.clear();
-        v_tensors_swa.clear();
-        tensors_state.clear();
+        // k_tensors_trans.clear();
+        // v_tensors_trans.clear();
+        // k_tensors_swa.clear();
+        // v_tensors_swa.clear();
+        // tensors_state.clear();
         log.log("released memory and cleaned up vattention ...");
     }
 };

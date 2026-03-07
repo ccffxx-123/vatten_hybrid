@@ -51,6 +51,7 @@ py::object dtype;
 int max_batch_size;   
 long max_context_length; 
 
+// mapped_pages_swa: 每个请求当前映射的所有缓冲区页数（逻辑上的映射页数，从头开始连续的，包括复用的）
 std::vector<u64> mapped_pages_trans, mapped_pages_swa, mapped_pages_state; 
 std::vector<u64> curr_seq_lengths; 
 

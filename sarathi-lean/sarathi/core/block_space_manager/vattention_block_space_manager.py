@@ -5,6 +5,7 @@ import vattention
 from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.model_executor.attention import get_attn_type
 import math
+from sarathi.config import ModelConfig, ParallelConfig
 
 class vAttentionBlockSpaceManager():
 
@@ -12,6 +13,8 @@ class vAttentionBlockSpaceManager():
         block_size: int,
         num_gpu_blocks: int,
         max_model_len: int,
+        model_config: ModelConfig,
+        parallel_config: ParallelConfig,
         watermark: float = 0.01,
     ) -> None:
         self.block_size = block_size 

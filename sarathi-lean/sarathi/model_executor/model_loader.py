@@ -10,7 +10,6 @@ from transformers import PretrainedConfig
 from sarathi.config import ModelConfig
 from sarathi.model_executor.models import *  # pylint: disable=wildcard-import
 from sarathi.model_executor.weight_utils import initialize_dummy_weights
-from sarathi.model_executor.models.Jamba import JambaForCausalLM
 
 
 # TODO(woosuk): Lazy-load the model classes.
@@ -19,14 +18,10 @@ _MODEL_REGISTRY = {
     "LlamaForCausalLM": LlamaForCausalLM,       # llama 3.1
     "InternLMForCausalLM": InternLMForCausalLM,
     "MistralForCausalLM": MinistralForCausalLM,     # Mistral-7B-v0.3 & ministral-8b
-    # "MistralForCausalLM": MistralForCausalLM,     # Mistral-7B (全滑动窗口)
     "QWenLMHeadModel": QWenLMHeadModel,
     "YiForCausalLM": YiForCausalLM,
     # "Gemma3ForConditionalGeneration": Gemma3ForCausalLM,   #add (gemma3-12b)
     "Gemma2ForCausalLM": Gemma2ForCausalLM,          # gemma2-8b
-    # "MllamaForConditionalGeneration":MllamaForConditionalGeneration,   #llama3.2-vision-11b
-    # "Llama4ForConditionalGeneration":Llama4ForConditionalGeneration,   #llama-4
-    "JambaForCausalLM":JambaForCausalLM   # jamba-mini-1.6 (12B active ,52B total)
 }
 
 

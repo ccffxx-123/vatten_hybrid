@@ -5,6 +5,7 @@
 #include <tuple>
 #include <stdexcept>
 #include <cuda.h>
+#include <iostream>  // 新增：用于 std::cout
 
 inline CUPage pop_cuda_page() {
     if (cuda_pages.empty())
@@ -34,6 +35,12 @@ inline bool map_pages_swa(int reqId, u64 req_offset,
     CUPage k_page, v_page;
     u64 req_base = get_req_begin_offset_virt_swa(reqId);
     u64 offset_within_req = req_offset - req_base;
+    // std::cout << "-----------------------------------------------------------------";
+    // std::cout << "  req_offset : " << std::to_string(req_offset);
+    // std::cout << "  req_base : " << std::to_string(req_base);
+    // std::cout << "  offset_within_req : " << std::to_string(offset_within_req);
+    // std::cout << "  virt_buff_size_per_windows : " << std::to_string(virt_buff_size_per_windows);
+    // std::cout << "-----------------------------------------------------------------";
     if (offset_within_req >= virt_buff_size_per_windows) {
         u64 req_offset_initial = offset_within_req % virt_buff_size_per_windows + req_base;
         auto key_initial = std::make_tuple((u64)reqId, req_offset_initial, (u64)typeId);

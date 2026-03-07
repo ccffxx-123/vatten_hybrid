@@ -4,7 +4,8 @@ from sarathi.config import BaseSchedulerConfig, CacheConfig, ModelConfig, Parall
 from sarathi.core.block_space_manager.block_space_manager_registry import (
     BlockSpaceManagerRegistry,
 )
-from sarathi.core.block_space_manager.vattention_block_space_manager import vAttentionBlockSpaceManager
+# from sarathi.core.block_space_manager.vattention_block_space_manager import vAttentionBlockSpaceManager
+from sarathi.core.block_space_manager.vattention_hybird_block_space_manager import vAttentionBlockSpaceManager
 from sarathi.core.datatypes.sequence import Sequence, SequenceScheduleMetadata
 from sarathi.core.sequence_manager.base_sequence_manager import BaseSequenceManager
 from sarathi.model_executor.attention import AttentionBackend
@@ -27,9 +28,9 @@ class WorkerSequenceManager(BaseSequenceManager):
                 self.block_manager = vAttentionBlockSpaceManager(
                     cache_config.block_size,
                     cache_config.num_gpu_blocks,
+                    scheduler_config.max_model_len,
                     model_config,
                     parallel_config,
-                    scheduler_config.max_model_len,
                 )
         else:
             self.block_manager = BlockSpaceManagerRegistry.get(

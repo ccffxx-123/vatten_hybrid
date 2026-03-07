@@ -59,6 +59,7 @@ public:
 
         virt_buff_size = virt_buff_size_per_req * max_batch_size;
         virt_buff_num_kv_tokens = max_batch_size * max_context_length * num_layers;
+        log.log("virt_buff_size_per_token: " + std::to_string(virt_buff_size_per_token));
         log.log("virt_buff_num_kv_tokens: " + std::to_string(virt_buff_num_kv_tokens));
         log.log("virt_buff_size_per_req: " + std::to_string(virt_buff_size_per_req / MB) + " MB");
         log.log("virt_buff_size: " + std::to_string(virt_buff_size / MB) + " MB");
@@ -67,8 +68,15 @@ public:
     inline void show_allocator_state()
     {
         std::stringstream ss;
-        u64 nr_pages = cuda_pages.size();
-        log.log("Free pool: " + std::to_string(PAGES_TO_KVBLOCKS_MEGACACHE(nr_pages)) + " KV blocks");
+        u64 nr_pages_in_pool = cuda_pages.size();
+        u64 total_free_kvblocks = get_num_free_kvblocks() * 2; 
+
+        log.log("==================== vHybrid Allocator State ====================");
+        log.log("Global Physical Memory Pool:");
+        // 打印原始空闲物理页数量及大致对应的 MB 数
+        log.log("  Raw Free Pages : " + std::to_string(nr_pages_in_pool) + " pages (" + std::to_string(nr_pages_in_pool * page_size / MB) + " MB)");
+        // 打印系统综合计算的空闲 KV blocks
+        log.log("  Free KV Blocks : " + std::to_string(total_free_kvblocks) + " blocks");
 
         log.log("reqId : seqlen: mapped: required");
         for (int i = 0; i < max_batch_size; i++)
@@ -76,8 +84,8 @@ public:
             ss.str(std::string());
             ss << std::setw(8) << i << ": "
                << std::setw(8) << get_req_seq_length(i) << " : "
-               << std::setw(8) << mapped_pages[i] << " : "
-               << std::setw(8) << tokens_to_pages(get_req_seq_length(i));
+               << std::setw(8) << mapped_pages[i] * 2 << " : "
+               << std::setw(8) << tokens_to_pages(get_req_seq_length(i)) * 2;
             log.log(ss.str());
         }
     }
@@ -159,7 +167,9 @@ public:
 
     u64 reserve_physical_pages(u64 free_memory)
     {
-        return reserve_cuda_pages(num_layers, free_memory, page_size);
+        u64 num_block_all = reserve_cuda_pages(num_layers, free_memory, page_size);
+        log.log("num_block_all: " + std::to_string(num_block_all));
+        return num_block_all;
     }
 
     inline u64 get_num_free_kvblocks()
@@ -296,7 +306,7 @@ public:
             reclaim_kvblocks_on_demand(nr_required);
 
         /* this should not get triggered frequently with our optimizations */
-        log.log("[DEBUG] allocating " + std::to_string(nr_required) + " pages for reqId: " + std::to_string(reqId));
+        // log.log("[DEBUG] allocating " + std::to_string(nr_required) + " pages for reqId: " + std::to_string(reqId));
         grow_kvcache_phys(reqId, nr_required, true);
         set_req_seq_length(reqId, seq_len);
     }
@@ -511,6 +521,7 @@ public:
     /* TODO(ashish): check if this is compatible with PyTorch destructor */
     void cleanup()
     {
+        show_allocator_state();
         wait_kvcache_manager_sync();
         DO_KVCACHE_CLEANUP(page_size);
         k_tensors.clear();

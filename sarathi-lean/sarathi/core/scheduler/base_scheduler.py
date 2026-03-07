@@ -12,7 +12,8 @@ from sarathi.core.policy import PolicyFactory
 from sarathi.logger import init_logger
 from sarathi.metrics.metrics_store import MetricsStore
 from sarathi.model_executor.attention import AttentionBackend
-from sarathi.core.block_space_manager.vattention_block_space_manager import vAttentionBlockSpaceManager
+# from sarathi.core.block_space_manager.vattention_block_space_manager import vAttentionBlockSpaceManager
+from sarathi.core.block_space_manager.vattention_hybird_block_space_manager import vAttentionBlockSpaceManager
 
 logger = init_logger(__name__)
 
@@ -50,7 +51,7 @@ class BaseScheduler(ABC):
         # Sequence groups in the RUNNING state.
         self.running: List[Sequence] = []
 
-    def set_block_manager(self, model_config):
+    def set_block_manager(self, model_config, parallel_config):
         attn_cfg = model_config.attention_backend
         self.attention_backend = attn_cfg
         if AttentionBackend.is_vATTN(attn_cfg):
@@ -59,6 +60,8 @@ class BaseScheduler(ABC):
                 self.cache_config.block_size,
                 self.cache_config.num_gpu_blocks,
                 self.scheduler_config.max_model_len,
+                model_config,
+                parallel_config,
             )
         else:
             self.block_manager = BlockSpaceManagerRegistry.get(

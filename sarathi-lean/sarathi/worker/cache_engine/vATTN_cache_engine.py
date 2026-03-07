@@ -49,7 +49,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         return vattention.num_free_kvblocks()
 
     def allocate_gpu_cache(self) -> List[torch.Tensor]:
-        # vattention.set_verbose(True)
+        vattention.set_verbose(True)
         kv_cache = vattention.init_kvcache(
                                     self.num_layers,
                                     self.num_heads,
@@ -148,6 +148,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         return new_batch_idx
 
     def free_request(self, seq_id: int) -> None:
+        self.show_allocator_state()
         if seq_id in self.seq_to_batch_idx:
             batch_idx = self.seq_to_batch_idx[seq_id]
             vattention.free_batch_idx(batch_idx)
@@ -194,6 +195,10 @@ class vATTNCacheEngine(BaseCacheEngine):
     def cleanup_kvcache(self):
         # this is required to ensure UVM module is not holding on to the memory
         vattention.cleanup()
+
+    def show_allocator_state(self):
+        vattention.set_verbose(True)
+        vattention.show_allocator_state()
 
 
 def _get_dtype_size(dtype: torch.dtype) -> int:

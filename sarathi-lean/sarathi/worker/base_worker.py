@@ -251,6 +251,10 @@ class BaseWorker:
     def cleanup(self) -> None:
         self.cache_engine.cleanup_kvcache()
 
+    @synchronized
+    def show_allocator_state(self) -> None:
+        self.cache_engine.show_allocator_state()
+
 def _init_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
@@ -283,3 +287,4 @@ def _init_distributed_environment(
     initialize_model_parallel(
         parallel_config.tensor_parallel_size, parallel_config.pipeline_parallel_size
     )
+

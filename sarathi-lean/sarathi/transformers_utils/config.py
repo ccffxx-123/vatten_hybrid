@@ -20,7 +20,7 @@ def get_config(
         config = AutoConfig.from_pretrained(
             model, trust_remote_code=trust_remote_code, revision=revision
         )
-        # print(f'config = {config}')
+        print(f'config = {config}')
     except ValueError as e:
         if (
             not trust_remote_code
@@ -35,7 +35,7 @@ def get_config(
             raise RuntimeError(err_msg) from e
         else:
             raise e
-    print(config.model_type)
+    # print(config.model_type)
 
     if config.model_type in _CONFIG_REGISTRY:
         # print('----------------------------------------------11111111111')

@@ -70,20 +70,7 @@ class vATTNCacheEngine(BaseCacheEngine):
     def _init_hybrid_params(self, model_config: ModelConfig, parallel_config: ParallelConfig):
         """Extract per-layer-type counts and Mamba/SWA dimensions."""
         # Layer counts -------------------------------------------------
-        n_trans, n_swa, n_state = model_config.get_num_layers_by_type()
-
-        # The C++ side requires every count > 0.  For unused types we
-        # pass 1 (the virtual tensor is tiny and no physical pages are
-        # mapped for inactive types).
-        # 后续需要改
-        self.num_layers_trans = max(n_trans, 1)
-        self.num_layers_swa = max(n_swa, 1)
-        self.num_layers_state = max(n_state, 1)
-
-        # Remember the *real* counts so we can build the layer map later
-        self._real_num_trans = n_trans
-        self._real_num_swa = n_swa
-        self._real_num_state = n_state
+        self.num_layers_trans, self.num_layers_swa, self.num_layers_state = model_config.get_num_layers_by_type()
 
         # Mamba / SWA dimensions ---------------------------------------
         self.d_state = model_config.get_d_state() or 16  # C++ needs > 0
@@ -92,6 +79,11 @@ class vATTNCacheEngine(BaseCacheEngine):
 
         # Per-layer type list (length = total num_layers) ----------------
         self.layer_type_list = model_config.get_layer_type_list()
+
+        # print(f'1111111111111111111111111111111111111111111111111111111111111111111111111')
+        # print(f"num_layers_trans: {self.num_layers_trans}")
+        # print(f"num_layers_swa: {self.num_layers_swa}")
+        # print(f"num_layers_state: {self.num_layers_state}")
 
 
     # ------------------------------------------------------------------
@@ -109,6 +101,7 @@ class vATTNCacheEngine(BaseCacheEngine):
             attention layers or a single ``state_tensor`` for Mamba layers.
             The model forward pass uses ``kv_caches[layer_id]``.
         """
+        vattention.set_verbose(True)
         kv_tensors = vattention.init_kvcache(
             [self.num_layers_trans, self.num_layers_swa, self.num_layers_state],
             self.num_heads,       # num_kv_heads (from BaseCacheEngine)
@@ -175,8 +168,8 @@ class vATTNCacheEngine(BaseCacheEngine):
 
         logger.info(
             f"Hybrid vATTN cache initialised: "
-            f"trans={self._real_num_trans} swa={self._real_num_swa} "
-            f"state={self._real_num_state} layers, "
+            f"trans={self.num_layers_trans} swa={self.num_layers_swa} "
+            f"state={self.num_layers_state} layers, "
             f"window={self.window_size} d_state={self.d_state}"
         )
 
@@ -257,6 +250,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         return new_batch_idx
 
     def free_request(self, seq_id: int) -> None:
+        self.show_allocator_state()
         if seq_id in self.seq_to_batch_idx:
             batch_idx = self.seq_to_batch_idx[seq_id]
             vattention.free_batch_idx(batch_idx)
@@ -344,3 +338,7 @@ class vATTNCacheEngine(BaseCacheEngine):
 
     def cleanup_kvcache(self):
         vattention.cleanup()
+
+    def show_allocator_state(self):
+        vattention.set_verbose(True)
+        vattention.show_allocator_state()

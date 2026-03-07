@@ -157,7 +157,9 @@ class EngineArgs:
             if "megacache" in self.attention_backend.lower():
                 block_size = block_size // (model_config.hf_config.num_hidden_layers // self.pipeline_parallel_size)
             block_size = block_size // elem_size
-
+        print(f'---------------------------------------------------------------------------------------')
+        print(f"block_size: {block_size}")
+        print(f"page_size: {page_size}")
         cache_config = CacheConfig(
             block_size=block_size,
             page_size=page_size,

@@ -23,8 +23,8 @@ rule cuda_compile
 
 
 
-build /workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache.o: compile /workspace/vattention/sarathi-lean/csrc/cache.cpp
-build /workspace/vattention/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache_kernels.o: cuda_compile /workspace/vattention/sarathi-lean/csrc/cache_kernels.cu
+build /workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache.o: compile /workspace/vatten_hybrid/sarathi-lean/csrc/cache.cpp
+build /workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache_kernels.o: cuda_compile /workspace/vatten_hybrid/sarathi-lean/csrc/cache_kernels.cu
 
 
 

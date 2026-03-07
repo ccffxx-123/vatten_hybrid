@@ -274,14 +274,14 @@ class ModelConfig:
         total = self.hf_config.num_hidden_layers
 
         # ---- Strategy 1: explicit per-layer list ----
-        block_types = getattr(self.hf_config, "layers_block_type", None)
+        block_types = getattr(self.hf_config, "layer_types", None)
         if block_types is not None:
             assert len(block_types) == total, (
-                f"layers_block_type length ({len(block_types)}) "
+                f"layer_types length ({len(block_types)}) "
                 f"!= num_hidden_layers ({total})"
             )
-            _TRANS = {"full", "transformer", "attention"}
-            _SWA   = {"sliding_window", "swa"}
+            _TRANS = {"full_attention", "transformer", "attention"}
+            _SWA   = {"sliding_window", "sliding_attention"}
             _STATE = {"mamba", "state", "ssm", "recurrent"}
 
             n_trans = n_swa = n_state = 0
@@ -343,15 +343,15 @@ class ModelConfig:
         """
         total = self.hf_config.num_hidden_layers
 
-        _TRANS = {"full", "transformer", "attention"}
-        _SWA   = {"sliding_window", "swa"}
+        _TRANS = {"full_attention", "transformer", "attention"}
+        _SWA   = {"sliding_window", "sliding_attention"}
         _STATE = {"mamba", "state", "ssm", "recurrent"}
 
         # ---- Strategy 1: explicit per-layer list ----
-        block_types = getattr(self.hf_config, "layers_block_type", None)
+        block_types = getattr(self.hf_config, "layer_types", None)
         if block_types is not None:
             assert len(block_types) == total, (
-                f"layers_block_type length ({len(block_types)}) "
+                f"layer_types length ({len(block_types)}) "
                 f"!= num_hidden_layers ({total})"
             )
             result: List[str] = []

@@ -2,7 +2,6 @@ from sarathi.model_executor.models.falcon import FalconForCausalLM
 from sarathi.model_executor.models.internlm import InternLMForCausalLM
 from sarathi.model_executor.models.llama import LlamaForCausalLM
 from sarathi.model_executor.models.ministral import MinistralForCausalLM
-from sarathi.model_executor.models.mistral import MistralForCausalLM
 from sarathi.model_executor.models.qwen import QWenLMHeadModel
 from sarathi.model_executor.models.yi import YiForCausalLM
 # from sarathi.model_executor.models.Jamba import JambaForCausalLM
@@ -14,7 +13,6 @@ __all__ = [
     "LlamaForCausalLM",
     "YiForCausalLM",
     "QWenLMHeadModel",
-    "MistralForCausalLM",
     "MinistralForCausalLM",
     "FalconForCausalLM",
     "InternLMForCausalLM",

@@ -11,19 +11,10 @@ from transformers.configuration_utils import PretrainedConfig
 
 
 class Gemma3TextConfig(PretrainedConfig):
-    """Flat text-only view of a Gemma 3 checkpoint config.
-
-    When ``get_config()`` loads a ``Gemma3ForConditionalGeneration`` checkpoint
-    it receives the top-level ``Gemma3Config``.  This class extracts every
-    relevant field from its ``text_config`` sub-object and exposes them at the
-    top level so the rest of the Sarathi engine sees a normal, flat config.
-    """
-
     model_type = "gemma3"
 
     def __init__(
         self,
-        # ---- core text dims ----
         vocab_size: int = 262208,
         hidden_size: int = 5376,
         intermediate_size: int = 21504,
@@ -31,23 +22,19 @@ class Gemma3TextConfig(PretrainedConfig):
         num_attention_heads: int = 32,
         num_key_value_heads: int = 16,
         head_dim: int = 128,
-        # ---- activation / norms ----
         hidden_activation: str = "gelu_pytorch_tanh",
         rms_norm_eps: float = 1e-6,
-        # ---- attention ----
         query_pre_attn_scalar: float = 168.0,
         attention_bias: bool = False,
         attention_dropout: float = 0.0,
         sliding_window: int = 1024,
         use_bidirectional_attention: bool = False,
         layer_types=None,
-        _sliding_window_pattern: int = 6,
-        # ---- position embeddings ----
+        sliding_window_pattern: int = 6,
         max_position_embeddings: int = 131072,
         rope_theta: float = 1000000.0,
         rope_local_base_freq: float = 10000.0,
         rope_scaling=None,
-        # ---- misc ----
         use_cache: bool = True,
         pad_token_id=None,
         bos_token_id: int = 2,
@@ -62,22 +49,19 @@ class Gemma3TextConfig(PretrainedConfig):
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
         self.head_dim = head_dim
-
         self.hidden_activation = hidden_activation
         self.rms_norm_eps = rms_norm_eps
-
         self.query_pre_attn_scalar = query_pre_attn_scalar
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
         self.sliding_window = sliding_window
         self.use_bidirectional_attention = use_bidirectional_attention
-        self._sliding_window_pattern = _sliding_window_pattern
+        self.sliding_window_pattern = sliding_window_pattern
 
-        # Default layer_types: 5 sliding + 1 full repeated
         if layer_types is None:
             layer_types = []
             for i in range(num_hidden_layers):
-                if (i + 1) % _sliding_window_pattern == 0:
+                if (i + 1) % sliding_window_pattern == 0:
                     layer_types.append("full_attention")
                 else:
                     layer_types.append("sliding_attention")
@@ -86,8 +70,14 @@ class Gemma3TextConfig(PretrainedConfig):
         self.max_position_embeddings = max_position_embeddings
         self.rope_theta = rope_theta
         self.rope_local_base_freq = rope_local_base_freq
-        self.rope_scaling = rope_scaling
 
+        # Store rope_scaling under a private name BEFORE super().__init__() so
+        # that PretrainedConfig's internal rope_scaling validator does NOT run
+        # on it. That validator would: (a) complain that layer_types strings
+        # are "unrecognized rope keys", and (b) rewrite the dict in a way that
+        # removes "factor", breaking sarathi's `assert "factor" in rope_scaling`.
+        # We restore the public attribute right after super().__init__() returns.
+        self._sarathi_rope_scaling = rope_scaling
         self.use_cache = use_cache
 
         super().__init__(
@@ -98,20 +88,18 @@ class Gemma3TextConfig(PretrainedConfig):
             **kwargs,
         )
 
+        # Assign after super() so PretrainedConfig won't intercept it.
+        self.rope_scaling = self._sarathi_rope_scaling
+
     @classmethod
     def from_gemma3_config(cls, gemma3_config) -> "Gemma3TextConfig":
-        """Build a flat config from a top-level HF Gemma3Config object.
-
-        Reads all fields from ``gemma3_config.text_config`` (which is itself
-        a PretrainedConfig sub-object in recent transformers versions) and
-        copies them to the flat Sarathi-compatible layout.
-        """
-        tc = gemma3_config.text_config  # nested text config object
+        """Build a flat Sarathi config from a top-level HF Gemma3Config."""
+        tc = gemma3_config.text_config
 
         def _get(attr, default=None):
             return getattr(tc, attr, default)
 
-        # rope_scaling: normalise rope_type → type for get_rope()
+        # Normalise rope_scaling key: HF uses rope_type, get_rope() needs type
         raw_rs = _get("rope_scaling")
         if isinstance(raw_rs, dict):
             rope_scaling = dict(raw_rs)
@@ -120,8 +108,6 @@ class Gemma3TextConfig(PretrainedConfig):
         else:
             rope_scaling = raw_rs
 
-        # Preserve the original architectures list so _get_model_architecture()
-        # in model_loader.py can look up the correct model class.
         architectures = getattr(gemma3_config, "architectures", None) or [
             "Gemma3ForConditionalGeneration"
         ]
@@ -142,14 +128,14 @@ class Gemma3TextConfig(PretrainedConfig):
             sliding_window=_get("sliding_window", 1024),
             use_bidirectional_attention=_get("use_bidirectional_attention", False),
             layer_types=_get("layer_types"),
-            _sliding_window_pattern=_get("_sliding_window_pattern", 6),
+            sliding_window_pattern=_get("_sliding_window_pattern", 6),
             max_position_embeddings=_get("max_position_embeddings", 131072),
             rope_theta=_get("rope_theta", 1000000.0),
             rope_local_base_freq=_get("rope_local_base_freq", 10000.0),
             rope_scaling=rope_scaling,
             use_cache=_get("use_cache", True),
             bos_token_id=getattr(gemma3_config, "bos_token_id", 2),
-            architectures=architectures,
             eos_token_id=getattr(gemma3_config, "eos_token_id", 1),
+            architectures=architectures,
         )
-
+        

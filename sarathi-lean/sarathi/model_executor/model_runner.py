@@ -42,6 +42,7 @@ class ModelRunner:
         self.scheduler_config = scheduler_config
         self.device = device
         self.rank = rank
+        self.cache_config = cache_config
 
         self.model = get_model(self.model_config)
         get_attention_wrapper().init(
@@ -182,7 +183,7 @@ class ModelRunner:
         physical_memory = int(total_gpu_memory * gpu_memory_utilization - peak_memory)
 
 
-        if self.model_config.is_hybrid_model():
+        if self.model_config.is_hybrid_model() and "page" in self.model_config.attention_backend:
             from sarathi.core.kv_cache_config_builder import build_kv_cache_config
             from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
             # num_blocks=1 仅用于计算单 block 字节数
@@ -192,7 +193,7 @@ class ModelRunner:
             )
             cache_block_size = HybridCacheEngine.get_cache_block_size(template_config)
         else:
-            cache_block_size = get_cache_engine(self.model_config.attention_backend, self.model_config).get_cache_block_size(
+            cache_block_size = get_cache_engine(self.model_config.attention_backend).get_cache_block_size(
                 block_size, self.model_config, self.parallel_config
             )
 

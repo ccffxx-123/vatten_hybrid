@@ -119,6 +119,18 @@ def _c_contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
         s *= dim
     return tuple(strides)
 
+# def get_per_layer_cache(self, num_layers: int) -> List:
+#     """将 [group_idx][buf_idx] 格式转为 [local_layer_idx] 的平坦列表"""
+#     per_layer = [None] * num_layers
+#     for layer_idx, (group_idx, buf_idx) in self.layer_to_cache_info.items():
+#         # layer_idx 是全局下标，需要转为本 pipeline stage 的局部下标
+#         local_idx = layer_idx % num_layers  # 单 stage 情况
+#         per_layer[local_idx] = self.gpu_cache[group_idx][buf_idx]
+#     return per_layer
+
+
+
+
 
 # ---------------------------------------------------------------------------
 # HybridCacheEngine
@@ -406,6 +418,27 @@ class HybridCacheEngine:
     ) -> None:
         pass
 
+    def get_per_layer_cache(self, num_layers: int) -> List[Optional[LayerCache]]:
+        """
+        将 gpu_cache[group_idx][buf_idx] 格式转换为模型 forward 所需的
+        平坦列表 per_layer[local_layer_idx]。
+
+        模型 forward 通过 kv_caches[local_layer_idx] 访问缓存，
+        而 gpu_cache 的组织方式是 [group_idx][buf_idx]，
+        通过 layer_to_cache_info 做映射。
+
+        对于单 pipeline stage：local_layer_idx == global_layer_idx。
+        对于多 pipeline stage：local_idx = global_idx % num_layers。
+
+        padding 层（layer_to_cache_info 中不存在）保持 None，
+        模型 forward 不会访问它们。
+        """
+        per_layer: List[Optional[LayerCache]] = [None] * num_layers
+        for global_layer_idx, (group_idx, buf_idx) in self.layer_to_cache_info.items():
+            local_idx = global_layer_idx % num_layers
+            per_layer[local_idx] = self.gpu_cache[group_idx][buf_idx]
+        return per_layer
+
     def num_free_blocks(self) -> int:
         """
         返回 BlockPool 的空闲 block 数。
@@ -463,4 +496,18 @@ class HybridCacheEngine:
         padded_page_size = max(g.kv_cache_spec.page_size_bytes for g in groups)
         return group_size * padded_page_size
 
-        
+
+    def show_allocator_state(self) -> None:
+        logger.info(
+            f"HybridCacheEngine: num_blocks={self.num_gpu_blocks}, "
+            f"num_groups={len(self.kv_cache_config.kv_cache_groups)}, "
+            f"group_size={self.group_size}"
+        )
+
+
+
+
+
+
+
+

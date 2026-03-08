@@ -158,7 +158,7 @@ class BaseWorker:
         torch.cuda.set_device(self.device)
         self.cache_config = cache_config
 
-        if not self.model_config.is_hybrid_model():
+        if (not self.model_config.is_hybrid_model()) or "vattn" in self.model_config.attention_backend:
             # 纯单类型模型：原有路径，不做任何改动
             mem_alloc_backend = get_cache_mem_alloc_backend(
                 self.model_config.attention_backend
@@ -194,7 +194,11 @@ class BaseWorker:
             self.cache_config, self.model_config,
             self.parallel_config, kv_cache_config,
         )
-        self.gpu_cache = self.cache_engine.gpu_cache
+        # self.gpu_cache = self.cache_engine.gpu_cache
+        # 转换为模型 forward 能直接使用的平坦列表
+        self.gpu_cache = self.cache_engine.get_per_layer_cache(
+            self.model_config.get_num_layers(self.parallel_config)
+        )
 
         self.seq_manager = HybridWorkerSequenceManager(
             cache_config=self.cache_config,

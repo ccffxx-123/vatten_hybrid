@@ -737,11 +737,12 @@ def _get_and_verify_max_len(
                 "contain one of the following keys to determine the original "
                 f"maximum length of the model: {possible_keys}"
             )
-        assert "factor" in rope_scaling
-        scaling_factor = rope_scaling["factor"]
-        if rope_scaling["type"] == "yarn":
-            derived_max_model_len = rope_scaling["original_max_position_embeddings"]
-        derived_max_model_len *= scaling_factor
+        # assert "factor" in rope_scaling
+        if "factor" in rope_scaling:
+            scaling_factor = rope_scaling["factor"]
+            if rope_scaling["type"] == "yarn":
+                derived_max_model_len = rope_scaling["original_max_position_embeddings"]
+            derived_max_model_len *= scaling_factor
 
     if max_model_len is None:
         logger.info(f"Using the derived maximum model length: {derived_max_model_len}")

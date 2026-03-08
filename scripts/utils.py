@@ -20,8 +20,8 @@ root = os.path.dirname(src)
 main = os.path.join(root, 'sarathi-lean', 'sarathi', 'benchmark', 'main.py')
 
 # 静态评估和动态评估的实验结果保存路径
-static_experiment_dir = os.path.join(root, 'experiments', 'e2e_static_eval_page')
-dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_page')
+static_experiment_dir = os.path.join(root, 'experiments', 'e2e_static_eval_vatten_gemma3_27b')
+dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_vatten_gemma3_27b')
 
 # ================= 数据集配置 =================
 # 默认使用 arXiv 摘要数据集的预处理轨迹文件
@@ -44,6 +44,7 @@ models = {
     # 'Llama-3.2-11B': {'tp': 1, 'hfrecord': 'meta-llama/Llama-3.2-11B-Vision-Instruct', 'logentry': 'Llama-3.2-11B'},
     "gemma-2-9b": {'tp': 1, 'hfrecord': 'google/gemma-2-9b', 'logentry': 'gemma-2-9b'},
     "gemma-3-4b": {'tp': 1, 'hfrecord': 'google/gemma-3-4b-it', 'logentry': 'gemma-3-4b'},
+    "gemma-3-27b": {'tp': 4, 'hfrecord': 'google/gemma-3-27b-it', 'logentry': 'gemma-3-27b'},
 }
 
 # ================= 核心辅助函数 =================

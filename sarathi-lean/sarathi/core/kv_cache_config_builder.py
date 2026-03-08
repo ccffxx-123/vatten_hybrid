@@ -253,6 +253,181 @@ def _split_layers_into_groups(
 # ---------------------------------------------------------------------------
 # 主接口
 # ---------------------------------------------------------------------------
+# old
+# def build_kv_cache_config(
+#     model_config: ModelConfig,
+#     cache_config: CacheConfig,
+#     parallel_config: ParallelConfig,
+#     num_blocks: Optional[int] = None,
+#     layer_name_templates: Optional[Dict[str, str]] = None,
+# ) -> KVCacheConfig:
+#     """
+#     根据 ModelConfig 自动构建 KVCacheConfig，分组算法与 vLLM PDF 一致。
+
+#     分组流程
+#     --------
+#     1. 调用 model_config.get_layer_type_list() 获取每层的类型标签。
+#     2. 按类型构建对应的 KVCacheSpec。
+#     3. 用 min-count 算法计算 group_size，确保跨 group page_size 相等
+#        （对应 PDF Case 2/3；Case 4 的 page_size 对齐在我们的架构中不需要）。
+#     4. 将每种类型的层按 group_size 切块，生成 KVCacheGroupSpec 列表。
+#     5. 组装 KVCacheConfig。
+
+#     Args:
+#         model_config     : 提供层类型列表、Mamba/SWA 参数等。
+#         cache_config     : 提供 block_size。
+#         parallel_config  : 用于计算每 GPU 的 kv_heads。
+#         num_blocks       : 逻辑 block 总数。
+#                            None → 使用 cache_config.num_gpu_blocks（profiling 后填入）。
+#                            1   → 仅用于计算单 block 字节数。
+#         layer_name_templates : 层名模板（{i} 为层下标占位符）。
+#                                None → 使用 _LAYER_NAME_TEMPLATES。
+
+#     Returns:
+#         KVCacheConfig，可直接传给 HybridCacheEngine 和 HybridBlockSpaceManager。
+#     """
+#     templates = layer_name_templates or _LAYER_NAME_TEMPLATES
+#     n_blocks = num_blocks if num_blocks is not None else cache_config.num_gpu_blocks
+
+#     # Step 1: 获取每层的类型标签
+#     layer_type_list: List[str] = model_config.get_layer_type_list()
+#     total_layers = len(layer_type_list)
+
+#     # Step 2: 按类型构建 KVCacheSpec（同类型层共享同一 spec 对象）
+#     present_types = set(layer_type_list)
+#     specs: Dict[str, KVCacheSpec] = {}
+#     for layer_type in present_types:
+#         if layer_type == "trans":
+#             specs["trans"] = _make_attention_spec(model_config, parallel_config, cache_config)
+#         elif layer_type == "swa":
+#             specs["swa"] = _make_sliding_window_spec(model_config, parallel_config, cache_config)
+#         elif layer_type == "state":
+#             specs["state"] = _make_mamba_spec(model_config, cache_config)
+#         else:
+#             raise ValueError(
+#                 f"未知层类型标签 '{layer_type}'，"
+#                 f"get_layer_type_list() 应只返回 'trans' / 'swa' / 'state'。"
+#             )
+
+#     # Step 3: 按类型收集层名（保持模型中的原始顺序）
+#     layer_names_by_type: Dict[str, List[str]] = {t: [] for t in specs}
+#     for i, layer_type in enumerate(layer_type_list):
+#         template = templates.get(layer_type)
+#         if template is None:
+#             raise ValueError(
+#                 f"层类型 '{layer_type}' 缺少对应的层名模板，"
+#                 f"请在 layer_name_templates 中补充。"
+#             )
+#         layer_names_by_type[layer_type].append(template.format(i=i))
+
+#     # Step 4: 计算 group_size（PDF Case 2/3 核心）
+#     layer_counts = {t: len(layer_names_by_type[t]) for t in specs}
+#     group_size = _compute_group_size(layer_counts)
+
+#     # Step 5: 切块 + 补 padding，生成 KVCacheGroupSpec 列表
+#     # padding_offset 在跨类型循环中累积，确保 "padding.N" 全局唯一
+#     kv_cache_groups: List[KVCacheGroupSpec] = []
+#     padding_offset = 0
+#     for layer_type in _TYPE_ORDER:
+#         if layer_type not in specs:
+#             continue
+#         groups_for_type, padding_offset = _split_layers_into_groups(
+#             layer_names=layer_names_by_type[layer_type],
+#             spec=specs[layer_type],
+#             group_size=group_size,
+#             padding_offset=padding_offset,
+#         )
+#         kv_cache_groups.extend(groups_for_type)
+
+#     # 统计实际 padding 层数（用于日志）
+#     total_padding = sum(
+#         1
+#         for g in kv_cache_groups
+#         for name in g.layer_names
+#         if name.startswith("padding.")
+#     )
+
+#     # 校验：所有 group 长度必须等于 group_size（_split_layers_into_groups 保证，此处二次确认）
+#     assert all(len(g.layer_names) == group_size for g in kv_cache_groups), (
+#         "内部错误：存在长度不等于 group_size 的 KVCacheGroup，请检查 _split_layers_into_groups。"
+#     )
+
+#     # 日志
+#     num_groups_by_type = {
+#         t: math.ceil(layer_counts[t] / group_size)
+#         for t in specs
+#     }
+#     logger.info(
+#         f"build_kv_cache_config: total_layers={total_layers}, "
+#         f"num_blocks={n_blocks}, group_size={group_size}, "
+#         f"groups_by_type={num_groups_by_type}, "
+#         f"total_groups={len(kv_cache_groups)}, "
+#         f"padding_slots={total_padding}"
+#     )
+
+#     return KVCacheConfig(num_blocks=n_blocks, kv_cache_groups=kv_cache_groups)
+
+
+
+# kv_cache_config_builder.py
+
+def _compute_adjusted_block_size(
+    model_config: ModelConfig,
+    cache_config: CacheConfig,
+    parallel_config: ParallelConfig,
+    present_types: set,
+) -> int:
+    """
+    对应 vLLM 文档 Case 4：Mamba + Attention 混合模型中，
+    Mamba 的每个状态槽大小（state_size_bytes）可能远大于
+    Attention 单 token 的 KV 大小（kv_hidden_size）。
+
+    由于所有 group 必须共享同一个 padded_page_size，
+    需要增大 Attention 的 block_size，使得：
+        block_size × kv_hidden_size_att >= state_size_mamba
+
+    其中：
+        kv_hidden_size_att = 2 × num_kv_heads × head_size × dtype_size  (K+V 每 token)
+        state_size_mamba   = MambaSpec.page_size_bytes  (一个状态槽的总字节数，与 block_size 无关)
+    """
+    block_size = cache_config.block_size
+
+    has_attn  = ("trans" in present_types) or ("swa" in present_types)
+    has_mamba = "state" in present_types
+
+    # 只有同时存在 Attention 和 Mamba 层时才需要对齐
+    if not (has_attn and has_mamba):
+        return block_size
+
+    # 1. 计算 Mamba 一个状态槽的字节数
+    #    MambaSpec.page_size_bytes 的 shapes 是固定的（不含 block_size 维度），
+    #    因此结果与 block_size 无关，直接用 block_size=1 的 spec 计算即可
+    mamba_spec = _make_mamba_spec(model_config, cache_config)
+    mamba_state_size = mamba_spec.page_size_bytes  # bytes for one state slot
+
+    # 2. 计算 Attention 每 token 的 KV 字节数（K+V 合计）
+    num_kv_heads = model_config.get_num_kv_heads(parallel_config)
+    head_size    = model_config.get_head_size()
+    dtype_size   = _dtype_size(model_config.dtype)
+    kv_hidden_size = 2 * num_kv_heads * head_size * dtype_size  # K+V per token
+
+    # 3. 计算满足条件的最小 block_size
+    #    block_size * kv_hidden_size >= mamba_state_size
+    min_block_size = math.ceil(mamba_state_size / kv_hidden_size)
+
+    if min_block_size > block_size:
+        logger.warning(
+            f"Mamba state size ({mamba_state_size} bytes) > "
+            f"attention page size at current block_size "
+            f"({block_size} × {kv_hidden_size} = {block_size * kv_hidden_size} bytes). "
+            f"自动增大 attention block_size: {block_size} → {min_block_size}。"
+            f"（对应 vLLM 文档 Case 4）"
+        )
+        block_size = min_block_size
+
+    return block_size
+
+
 
 def build_kv_cache_config(
     model_config: ModelConfig,
@@ -261,40 +436,44 @@ def build_kv_cache_config(
     num_blocks: Optional[int] = None,
     layer_name_templates: Optional[Dict[str, str]] = None,
 ) -> KVCacheConfig:
-    """
-    根据 ModelConfig 自动构建 KVCacheConfig，分组算法与 vLLM PDF 一致。
-
-    分组流程
-    --------
-    1. 调用 model_config.get_layer_type_list() 获取每层的类型标签。
-    2. 按类型构建对应的 KVCacheSpec。
-    3. 用 min-count 算法计算 group_size，确保跨 group page_size 相等
-       （对应 PDF Case 2/3；Case 4 的 page_size 对齐在我们的架构中不需要）。
-    4. 将每种类型的层按 group_size 切块，生成 KVCacheGroupSpec 列表。
-    5. 组装 KVCacheConfig。
-
-    Args:
-        model_config     : 提供层类型列表、Mamba/SWA 参数等。
-        cache_config     : 提供 block_size。
-        parallel_config  : 用于计算每 GPU 的 kv_heads。
-        num_blocks       : 逻辑 block 总数。
-                           None → 使用 cache_config.num_gpu_blocks（profiling 后填入）。
-                           1   → 仅用于计算单 block 字节数。
-        layer_name_templates : 层名模板（{i} 为层下标占位符）。
-                               None → 使用 _LAYER_NAME_TEMPLATES。
-
-    Returns:
-        KVCacheConfig，可直接传给 HybridCacheEngine 和 HybridBlockSpaceManager。
-    """
     templates = layer_name_templates or _LAYER_NAME_TEMPLATES
     n_blocks = num_blocks if num_blocks is not None else cache_config.num_gpu_blocks
 
     # Step 1: 获取每层的类型标签
     layer_type_list: List[str] = model_config.get_layer_type_list()
     total_layers = len(layer_type_list)
-
-    # Step 2: 按类型构建 KVCacheSpec（同类型层共享同一 spec 对象）
     present_types = set(layer_type_list)
+
+    # ── 新增：Case 4 block_size 对齐 ──────────────────────────────────
+    # 必须在构建 spec 之前完成，后续所有 spec 都用调整后的 block_size
+    adjusted_block_size = _compute_adjusted_block_size(
+        model_config, cache_config, parallel_config, present_types
+    )
+    # # 用调整后的 block_size 构造一个临时 cache_config，避免修改原始对象
+    # if adjusted_block_size != cache_config.block_size:
+    #     import dataclasses
+    #     cache_config = dataclasses.replace(
+    #         cache_config, block_size=adjusted_block_size
+    #     )
+
+    # 替换 dataclasses.replace 的写法
+    if adjusted_block_size != cache_config.block_size:
+        from sarathi.config import CacheConfig as _CC
+        cache_config = _CC(
+            block_size=adjusted_block_size,
+            page_size=cache_config.page_size,
+            gpu_memory_utilization=cache_config.gpu_memory_utilization,
+            max_batch_size=cache_config.max_batch_size,
+        )
+        # num_gpu_blocks 和 memory_for_gpu 是 profiling 后填入的，也需要带过来
+        cache_config.num_gpu_blocks = n_blocks
+        cache_config.memory_for_gpu = getattr(
+            cache_config, "memory_for_gpu", None
+        )
+
+    # ──────────────────────────────────────────────────────────────────
+
+    # Step 2: 按类型构建 KVCacheSpec（使用调整后的 block_size）
     specs: Dict[str, KVCacheSpec] = {}
     for layer_type in present_types:
         if layer_type == "trans":
@@ -304,12 +483,10 @@ def build_kv_cache_config(
         elif layer_type == "state":
             specs["state"] = _make_mamba_spec(model_config, cache_config)
         else:
-            raise ValueError(
-                f"未知层类型标签 '{layer_type}'，"
-                f"get_layer_type_list() 应只返回 'trans' / 'swa' / 'state'。"
-            )
+            raise ValueError(f"未知层类型标签 '{layer_type}'")
 
-    # Step 3: 按类型收集层名（保持模型中的原始顺序）
+    # Step 3 以下保持不变 ...
+        # Step 3: 按类型收集层名（保持模型中的原始顺序）
     layer_names_by_type: Dict[str, List[str]] = {t: [] for t in specs}
     for i, layer_type in enumerate(layer_type_list):
         template = templates.get(layer_type)
@@ -366,4 +543,4 @@ def build_kv_cache_config(
     )
 
     return KVCacheConfig(num_blocks=n_blocks, kv_cache_groups=kv_cache_groups)
-    
+

@@ -54,6 +54,7 @@ class BaseScheduler(ABC):
     def set_block_manager(self, model_config, parallel_config):
         attn_cfg = model_config.attention_backend
         self.attention_backend = attn_cfg
+        
         if AttentionBackend.is_vATTN(attn_cfg):
             self.block_manager = vAttentionBlockSpaceManager(
                 # model_config.hf_config.num_hidden_layers
@@ -64,7 +65,20 @@ class BaseScheduler(ABC):
                 parallel_config,
             )
         else:
-            self.block_manager = BlockSpaceManagerRegistry.get(
+            if model_config.is_hybrid_model():
+                from sarathi.core.kv_cache_config_builder import build_kv_cache_config
+                from sarathi.core.block_space_manager.hybrid_block_space_manager import (
+                    HybridBlockSpaceManager,
+                )
+                kv_cache_config = build_kv_cache_config(
+                    model_config, self.cache_config, parallel_config
+                )
+                self.block_manager = HybridBlockSpaceManager(
+                    kv_cache_config=kv_cache_config,
+                    max_model_len=self.scheduler_config.max_model_len,
+                )
+            else:
+                self.block_manager = BlockSpaceManagerRegistry.get(
                 self.scheduler_config.type,
                 self.cache_config.block_size,
                 self.cache_config.num_gpu_blocks,

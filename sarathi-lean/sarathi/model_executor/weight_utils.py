@@ -22,6 +22,7 @@ class Disabledtqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)
+    
 
 
 def get_lock(model_name_or_path: str, cache_dir: Optional[str] = None):

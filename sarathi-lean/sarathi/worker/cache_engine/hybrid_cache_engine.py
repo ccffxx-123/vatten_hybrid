@@ -5,33 +5,56 @@
 负责按照 KVCacheConfig 在 GPU 上分配实际张量，
 替换原来只分配单一 (k_cache, v_cache) 列表的 vLLMCacheEngine。
 
-内存布局
---------
-对于每一个 KVCacheGroup 中的每一层，独立分配该层的 GPU 张量：
+内存布局（与 vLLM 文档一致）
+-----------------------------
+对于有 n 个 KVCacheGroup、每组 m 层（group_size = m）的模型：
 
-  Attention 层（FullAttentionSpec / SlidingWindowSpec）：
-    k_cache : (num_blocks, block_size, num_kv_heads, head_size)  dtype=spec.dtype
-    v_cache : (num_blocks, block_size, num_kv_heads, head_size)  dtype=spec.dtype
-    → gpu_cache[layer_idx] = (k_cache, v_cache)
+  分配 m 个 raw int8 物理缓冲区（raw_buffers[0] … raw_buffers[m-1]）。
+  每个 raw buffer 大小 = num_blocks × padded_page_size_bytes
+  其中 padded_page_size_bytes = max(page_size_bytes across all groups)
 
-  Mamba 层（MambaSpec）：
-    state_i : (num_blocks, *shapes[i])  dtype=spec.dtypes[i]  （每个状态一个张量）
-    → gpu_cache[layer_idx] = [state_0, state_1, ...]
+  每个 group 用 as_strided 从同一 raw buffer 上创建自己类型的视图：
+    Attention group → (k_cache, v_cache)
+    Mamba group     → [conv_state, ssm_state]
 
-gpu_cache 以层下标索引，与当前 model_runner 的访问方式兼容：
-    model_runner 对第 i 层调用 forward(kv_cache=self.gpu_cache[i])
+  不同 group 的 block_ids 由 BlockPool 保证互不重叠，因此共享同一物理 buffer
+  不会产生冲突——各组的 KV 数据写在 buffer 的不同 block slot 范围内。
 
-每个 Block 的 GPU 内存占用
---------------------------
-单个 block 占用的总字节数 = Σ (本 group 的层数 × spec.page_size_bytes)
+  访问方式：
+    gpu_cache[group_idx][buf_idx]  → 该 group 对应 buffer 的类型化视图
 
-这个值由 get_cache_block_size() 计算，
-供 profile_num_available_blocks() 推导 num_blocks 使用。
+为什么必须用 raw buffer + as_strided（而不是直接分配 typed tensor）？
+--------------------------------------------------------------------
+Attention 的 page_size = 2 × block_size × num_kv_heads × head_size × dtype_size
+Mamba 的   page_size = sum(prod(state_shape) × dtype_size)
+两者通常不相等。
 
-层名 → 层下标的提取
+若 Mamba 用自己的 page_size_bytes 直接分配 (num_blocks, *state_shape)，
+但实际 raw buffer 是按 padded_page_size（Attention 更大）分配的，
+则 Mamba 的 num_blocks = raw_size / mamba_page_size > raw_size / padded_page_size。
+这会导致 Mamba 视图越界访问其他 group 的 block slot。
+
+正确做法：Mamba 的 as_strided stride[0] = padded_page_size // dtype_size，
+使每个 block 间距与 Attention 完全相同，Mamba 只用每个 slot 的前几个字节。
+
+层 → buffer 的映射
 -------------------
-使用正则 r'\\.(\d+)\\.' 从层名（如 "model.layers.5.self_attn"）中提取下标 5。
-若命名约定不同请修改 _extract_layer_index()。
+self.layer_to_cache_info: Dict[int, Tuple[int, int]]
+    key  : 全局层下标（model.layers.N 中的 N）
+    value: (group_idx, buffer_idx)
+        group_idx  = 该层属于第几个 KVCacheGroup
+        buffer_idx = 该层在其 group 中的位置（= raw buffer 下标）
+
+模型 forward 访问方式（v3）
+----------------------------
+    group_idx, buf_idx = cache_engine.layer_to_cache_info[global_layer_idx]
+    layer_cache = gpu_cache[group_idx][buf_idx]    # 类型化视图
+    block_ids   = seq_metadata.block_tables[group_idx]
+
+    # Attention 层：
+    k_cache, v_cache = layer_cache
+    # Mamba 层：
+    conv_state, ssm_state = layer_cache   # block_id=0 → null_block，跳过写入
 """
 
 import re
@@ -53,11 +76,12 @@ from sarathi.logger import init_logger
 
 logger = init_logger(__name__)
 
-
 # 张量类型别名
 AttentionCache = Tuple[torch.Tensor, torch.Tensor]   # (k_cache, v_cache)
 MambaCache = List[torch.Tensor]                       # [state_0, state_1, ...]
 LayerCache = Union[AttentionCache, MambaCache]
+# gpu_cache 的完整类型：[group_idx][buf_idx] → LayerCache
+GroupedCache = List[List[LayerCache]]
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +110,16 @@ def _dtype_size(dtype: torch.dtype) -> int:
     return torch.tensor([], dtype=dtype).element_size()
 
 
+def _c_contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
+    """计算给定 shape 的 C 连续（row-major）stride。"""
+    strides = []
+    s = 1
+    for dim in reversed(shape):
+        strides.insert(0, s)
+        s *= dim
+    return tuple(strides)
+
+
 # ---------------------------------------------------------------------------
 # HybridCacheEngine
 # ---------------------------------------------------------------------------
@@ -94,28 +128,19 @@ class HybridCacheEngine:
     """
     混合模型的 GPU KV Cache 分配引擎。
 
-    初始化后，self.gpu_cache 是一个以层下标索引的列表：
-      self.gpu_cache[i] = Attention 层 → (k_cache, v_cache)
-                        = Mamba 层    → [state_0, state_1, ...]
+    初始化后：
+      self.gpu_cache[group_idx][buf_idx]  = 对应 group、位置 buf_idx 的类型化缓存视图
+      self.layer_to_cache_info            = Dict[global_layer_idx → (group_idx, buffer_idx)]
 
-    替换 vLLMCacheEngine 的方法
-    ---------------------------
-    在 base_worker.py 的 init_cache_engine() 中：
+    内存布局（与 vLLM 文档一致）：
+      m 个 raw int8 物理 buffer，每个大小 = num_blocks × padded_page_size_bytes。
+      每个 group 通过 as_strided 创建各自类型的视图，stride[0] 统一为
+      padded_page_size_bytes // dtype_size，保证跨类型 block 对齐正确。
 
-        # 原来
-        self.cache_engine = vLLMCacheEngine(cache_config, model_config, parallel_config)
-
-        # 替换为
-        kv_cache_config = build_kv_cache_config(model_config, cache_config, parallel_config)
-        self.cache_engine = HybridCacheEngine(cache_config, model_config, parallel_config,
-                                              kv_cache_config)
-        self.gpu_cache = self.cache_engine.gpu_cache
-
-    profile_num_available_blocks 中的 block_size 计算
-    --------------------------------------------------
-    原来：cache_block_size = vLLMCacheEngine.get_cache_block_size(block_size, ...)
-    替换：cache_block_size = HybridCacheEngine.get_cache_block_size(kv_cache_config_template)
-    其中 kv_cache_config_template 的 num_blocks 可以先填 1（仅用于计算单 block 字节数）。
+    模型 forward 访问方式：
+        group_idx, buf_idx = cache_engine.layer_to_cache_info[global_layer_idx]
+        layer_cache = gpu_cache[group_idx][buf_idx]
+        block_ids   = seq_metadata.block_tables[group_idx]
     """
 
     def __init__(
@@ -133,100 +158,237 @@ class HybridCacheEngine:
         self.num_gpu_blocks: int = kv_cache_config.num_blocks
         self.num_layers: int = model_config.get_num_layers(parallel_config)
 
+        # group_size = m：每组层数（所有 group 大小相同，由 builder 的 assert 保证）
+        self.group_size: int = len(kv_cache_config.kv_cache_groups[0].layer_names)
+
         logger.info(
             f"HybridCacheEngine: num_blocks={self.num_gpu_blocks}, "
             f"num_layers={self.num_layers}, "
-            f"groups={[type(g.kv_cache_spec).__name__ for g in kv_cache_config.kv_cache_groups]}"
+            f"group_size={self.group_size}, "
+            f"num_groups={len(kv_cache_config.kv_cache_groups)}"
         )
 
-        # 核心：分配 GPU 张量
-        self.gpu_cache: List[Optional[LayerCache]] = self._allocate_gpu_cache()
+        # 核心：分配 m 个 raw buffer + 每 group 各自的类型化视图 + 层→cache 映射表
+        self.gpu_cache: GroupedCache                          # [group_idx][buf_idx]
+        self.layer_to_cache_info: Dict[int, Tuple[int, int]] # layer_idx → (group_idx, buf_idx)
+        self.gpu_cache, self.layer_to_cache_info = self._allocate_gpu_cache()
 
     # ------------------------------------------------------------------
-    # GPU 张量分配
+    # GPU 张量分配：从 raw int8 buffer 创建各类型的 as_strided 视图
     # ------------------------------------------------------------------
 
-    def _allocate_attention_cache(
-        self, spec: Union[FullAttentionSpec, SlidingWindowSpec]
+    def _reshape_attention_from_raw(
+        self,
+        raw_buf: torch.Tensor,                           # int8，size = num_blocks * padded_page_size_bytes
+        spec: Union[FullAttentionSpec, SlidingWindowSpec],
+        padded_page_size_bytes: int,
     ) -> AttentionCache:
         """
-        分配单层 Attention 的 KV Cache。
-        k_cache / v_cache 形状：(num_blocks, block_size, num_kv_heads, head_size)
-        注意：所有 block 的 slot 都预先分配好，通过 block_id 直接索引。
+        从 raw int8 buffer 创建 Attention 的 (k_cache, v_cache) as_strided 视图。
+
+        布局（每个 block slot = padded_page_size_bytes 字节）：
+          [K_data (block_size×num_kv_heads×head_size×dtype_size bytes) |
+           V_data (同上) |
+           padding (padded_page_size - attn_page_size bytes，仅混合模型存在)]
+
+        stride[0] = padded_page_size_bytes // dtype_size
+        这保证 Attention 和 Mamba group 的 block_id 映射到相同的物理偏移。
         """
-        shape = (self.num_gpu_blocks, spec.block_size,
-                 spec.num_kv_heads, spec.head_size)
-        k_cache = torch.zeros(shape, dtype=spec.dtype, device="cuda")
-        v_cache = torch.zeros(shape, dtype=spec.dtype, device="cuda")
+        num_blocks = raw_buf.numel() // padded_page_size_bytes
+        dt_size = _dtype_size(spec.dtype)
+        # block 间距（以 spec.dtype 元素数计）
+        block_stride = padded_page_size_bytes // dt_size
+        # 每个 block slot 内 K/V 各自的元素数
+        kv_inner_elems = spec.block_size * spec.num_kv_heads * spec.head_size
+        inner_strides = _c_contiguous_strides(
+            (spec.block_size, spec.num_kv_heads, spec.head_size)
+        )
+        typed = raw_buf.view(spec.dtype)
+        k_cache = torch.as_strided(
+            typed,
+            size=(num_blocks, spec.block_size, spec.num_kv_heads, spec.head_size),
+            stride=(block_stride, *inner_strides),
+            storage_offset=0,
+        )
+        v_cache = torch.as_strided(
+            typed,
+            size=(num_blocks, spec.block_size, spec.num_kv_heads, spec.head_size),
+            stride=(block_stride, *inner_strides),
+            storage_offset=kv_inner_elems,  # V 紧接 K 之后（在同一 block slot 内）
+        )
         return (k_cache, v_cache)
 
-    def _allocate_mamba_cache(self, spec: MambaSpec) -> MambaCache:
+    def _reshape_mamba_from_raw(
+        self,
+        raw_buf: torch.Tensor,   # int8，size = num_blocks * padded_page_size_bytes
+        spec: MambaSpec,
+        padded_page_size_bytes: int,
+    ) -> MambaCache:
         """
-        分配单层 Mamba 的状态 Cache。
-        每个状态张量形状：(num_blocks, *state_shape)
-        例：conv_state → (num_blocks, d_model, d_conv-1)
-            ssm_state  → (num_blocks, num_heads, head_dim, d_state)
+        从 raw int8 buffer 创建 Mamba 各状态张量的 as_strided 视图。
+
+        布局（每个 block slot = padded_page_size_bytes 字节）：
+          [state_0_data | state_1_data | ... | padding]
+
+        stride[0] = padded_page_size_bytes // dtype_size（以各状态 dtype 元素数计）
+
+        关键修复：使用 padded_page_size_bytes（而非 spec.page_size_bytes）计算
+        block_stride 和 num_blocks，确保与 Attention group 的 block_id 对齐一致。
+        若用 spec.page_size_bytes（< padded），则
+          num_blocks_wrong = raw_size / mamba_page_size > actual num_blocks
+        会导致 Mamba 视图越界到相邻 group 的 block slot。
         """
+        num_blocks = raw_buf.numel() // padded_page_size_bytes
         states: List[torch.Tensor] = []
+        # 在 block slot 内的字节偏移（各状态依次排列）
+        offset_bytes_within_slot = 0
+
         for state_shape, dtype in zip(spec.shapes, spec.dtypes):
-            tensor = torch.zeros(
-                (self.num_gpu_blocks, *state_shape),
-                dtype=dtype,
-                device="cuda",
+            dt_size = _dtype_size(dtype)
+            # block 间距（以 dtype 元素数计）——必须用 padded，不能用 mamba 自己的 page_size
+            block_stride = padded_page_size_bytes // dt_size
+            # 该状态在 slot 内的起始元素偏移
+            slot_offset_elems = offset_bytes_within_slot // dt_size
+            inner_strides = _c_contiguous_strides(tuple(state_shape))
+            state = torch.as_strided(
+                raw_buf.view(dtype),
+                size=(num_blocks, *state_shape),
+                stride=(block_stride, *inner_strides),
+                storage_offset=slot_offset_elems,
             )
-            states.append(tensor)
+            states.append(state)
+            # 推进 slot 内偏移：该状态占用 prod(state_shape) × dt_size 字节
+            state_bytes = inner_strides[0] * state_shape[0] * dt_size  # prod × dt_size
+            offset_bytes_within_slot += state_bytes
+
+        # 运行时校验：各状态不应超出 padded_page_size
+        if offset_bytes_within_slot > padded_page_size_bytes:
+            raise ValueError(
+                f"MambaSpec 状态总大小 {offset_bytes_within_slot} 字节 "
+                f"超出 padded_page_size_bytes={padded_page_size_bytes}。"
+                f"请检查 build_kv_cache_config() 中的 padding 逻辑。"
+            )
         return states
 
-    def _allocate_layer_cache(self, spec: KVCacheSpec) -> LayerCache:
-        """根据 spec 类型分配对应的 GPU 张量。"""
+    def _reshape_for_spec(
+        self,
+        raw_buf: torch.Tensor,
+        spec: KVCacheSpec,
+        padded_page_size_bytes: int,
+    ) -> LayerCache:
+        """根据 spec 类型，从 raw buffer 创建对应的类型化视图。"""
         if isinstance(spec, (FullAttentionSpec, SlidingWindowSpec)):
-            return self._allocate_attention_cache(spec)
+            return self._reshape_attention_from_raw(raw_buf, spec, padded_page_size_bytes)
         elif isinstance(spec, MambaSpec):
-            return self._allocate_mamba_cache(spec)
+            return self._reshape_mamba_from_raw(raw_buf, spec, padded_page_size_bytes)
         else:
             raise ValueError(
                 f"不支持的 KVCacheSpec 类型: {type(spec).__name__}"
             )
 
-    def _allocate_gpu_cache(self) -> List[Optional[LayerCache]]:
+    def _allocate_gpu_cache(
+        self,
+    ) -> Tuple[GroupedCache, Dict[int, Tuple[int, int]]]:
         """
-        构建 gpu_cache 列表，下标 == 层下标。
+        分配 m 个 raw int8 物理 buffer，并为每个 group 创建类型化视图。
 
-        注意：同一 group 内所有层的 spec 相同，但每一层拥有独立的 GPU 张量
-        （不同层有不同的权重/状态，必须分开存储）。
+        vLLM 文档原文：
+          "对于有 n 个 KVCacheGroup 的模型，每组有 m 层，
+           分配 m 个缓冲区；每个缓冲区由 n 个层共享，每个层来自一个组。"
+
+        实现要点
+        --------
+        - 分配 m 个 raw int8 buffer，每个大小 = num_blocks × padded_page_size_bytes
+          padded_page_size_bytes = max(page_size_bytes across all groups)
+        - 每个 group 对每个 buffer 用 as_strided 创建自己类型的视图
+          → gpu_cache[group_idx][buf_idx] = 类型化视图（视图共享底层存储）
+        - 不同 group 使用不同 block_ids（由 BlockPool 保证互不重叠）
+          → 同一物理 buffer 的不同 block slot 范围各自存放不同 group 的数据
+        - padding 层（层名以 "padding." 开头）不对应真实层，
+          其 buffer slot 被空置，不写入 layer_to_cache_info
+
+        为何用 padded_page_size 而非各 group 自己的 page_size
+        -------------------------------------------------------
+        Mamba 的 page_size 通常小于 Attention 的 page_size。
+        若 Mamba 用自己的 page_size 计算 num_blocks / stride，
+        则 mamba_num_blocks = raw_size / mamba_page_size > actual num_blocks，
+        视图会越界到相邻 group 的 block slot。
+        统一用 padded_page_size 作为 stride，各 group 的 block_id → 物理偏移映射
+        完全相同，互不干扰。
         """
-        gpu_cache: List[Optional[LayerCache]] = [None] * self.num_layers
+        groups = self.kv_cache_config.kv_cache_groups
+        m = self.group_size
+        num_groups = len(groups)
 
-        for group in self.kv_cache_config.kv_cache_groups:
-            spec = group.kv_cache_spec
-            for layer_name in group.layer_names:
-                layer_idx = _extract_layer_index(layer_name)
-                if layer_idx >= self.num_layers:
-                    raise IndexError(
-                        f"层 '{layer_name}' 的下标 {layer_idx} "
-                        f">= num_layers {self.num_layers}"
-                    )
-                if gpu_cache[layer_idx] is not None:
-                    raise ValueError(
-                        f"层下标 {layer_idx} 被多个 group 声明，"
-                        f"每个层只能属于一个 KVCacheGroup。"
-                    )
-                # 每层独立分配（即使同 group 也各自分配，张量不共享）
-                gpu_cache[layer_idx] = self._allocate_layer_cache(spec)
-                logger.debug(
-                    f"已分配 {type(spec).__name__} cache for "
-                    f"layer[{layer_idx}] '{layer_name}'"
-                )
-
-        # 检查是否有层没有被任何 group 覆盖
-        missing = [i for i, c in enumerate(gpu_cache) if c is None]
-        if missing:
-            logger.warning(
-                f"以下层下标没有对应的 KVCacheGroup，gpu_cache[i] 为 None：{missing}。"
-                f"如果这些层确实不需要 KV Cache（如纯 MLP 层），可以忽略。"
+        # 校验：所有 group 大小相同
+        if any(len(g.layer_names) != m for g in groups):
+            raise ValueError(
+                f"KVCacheGroup 大小不一致（期望全部为 {m}）。"
+                f"请确保使用 build_kv_cache_config() 构建 KVCacheConfig，"
+                f"它会对各 group 补齐 padding 以保证等大小。"
             )
 
-        return gpu_cache
+        # padded_page_size = 各 group 中最大的 page_size_bytes
+        # 对于纯 Attention 模型：max = 实际值，无 padding overhead
+        # 对于 Attention+Mamba 模型：Attention 的 page_size 更大，Mamba slot 后有填充字节
+        padded_page_size = max(g.kv_cache_spec.page_size_bytes for g in groups)
+        page_sizes = {g.kv_cache_spec.page_size_bytes for g in groups}
+        if len(page_sizes) > 1:
+            logger.info(
+                f"混合模型跨 group page_size 不同：{page_sizes}（字节）。"
+                f"统一使用 padded_page_size={padded_page_size} 字节作为 block stride，"
+                f"Mamba 等小 page_size group 每个 block slot 后有填充字节。"
+            )
+
+        # 1. 分配 m 个 raw int8 物理 buffer
+        raw_size = self.num_gpu_blocks * padded_page_size
+        raw_buffers: List[torch.Tensor] = [
+            torch.zeros(raw_size, dtype=torch.int8, device="cuda")
+            for _ in range(m)
+        ]
+        logger.debug(
+            f"已分配 {m} 个 raw int8 buffer，"
+            f"每个 {raw_size} 字节 "
+            f"({self.num_gpu_blocks} blocks × {padded_page_size} bytes/block)"
+        )
+
+        # 2. 为每个 group 创建类型化视图
+        # gpu_cache[group_idx][buf_idx] = LayerCache
+        gpu_cache: GroupedCache = []
+        for g_idx, group in enumerate(groups):
+            group_cache: List[LayerCache] = []
+            spec = group.kv_cache_spec
+            for buf_idx in range(m):
+                view = self._reshape_for_spec(raw_buffers[buf_idx], spec, padded_page_size)
+                group_cache.append(view)
+            gpu_cache.append(group_cache)
+            logger.debug(
+                f"group[{g_idx}]（{type(spec).__name__}）已创建 {m} 个类型化视图"
+            )
+
+        # 3. 构建 global_layer_idx → (group_idx, buffer_idx) 映射
+        layer_to_cache_info: Dict[int, Tuple[int, int]] = {}
+        for g_idx, group in enumerate(groups):
+            for buf_idx, layer_name in enumerate(group.layer_names):
+                if layer_name.startswith("padding."):
+                    continue
+                layer_idx = _extract_layer_index(layer_name)
+                if layer_idx in layer_to_cache_info:
+                    raise ValueError(
+                        f"层下标 {layer_idx}（来自 '{layer_name}'）出现在多个 group 中。"
+                        f"每个真实层只能属于一个 KVCacheGroup。"
+                    )
+                layer_to_cache_info[layer_idx] = (g_idx, buf_idx)
+                logger.debug(
+                    f"层[{layer_idx}] '{layer_name}' → group={g_idx}, buffer={buf_idx}"
+                )
+
+        logger.info(
+            f"_allocate_gpu_cache 完成：{m} 个 raw buffer（{num_groups} groups × {m} 视图），"
+            f"{len(layer_to_cache_info)} 个真实层已映射，"
+            f"{num_groups * m - len(layer_to_cache_info)} 个 padding slot 已跳过。"
+        )
+        return gpu_cache, layer_to_cache_info
 
     # ------------------------------------------------------------------
     # 运行时接口（与 BaseCacheEngine 兼容）
@@ -254,7 +416,10 @@ class HybridCacheEngine:
         return self.num_gpu_blocks
 
     def cleanup_kvcache(self) -> None:
-        """释放所有 GPU 张量（显式置空让 GC 回收）。"""
+        """
+        释放所有 GPU 张量（显式置空让 GC 回收）。
+        gpu_cache 是 List[List[LayerCache]]，清空外层即可释放所有视图及 raw buffer。
+        """
         self.gpu_cache = []
         torch.cuda.empty_cache()
 
@@ -265,24 +430,37 @@ class HybridCacheEngine:
     @staticmethod
     def get_cache_block_size(kv_cache_config: KVCacheConfig) -> int:
         """
-        计算单个逻辑 block 在 GPU 上占用的总字节数（跨所有 group 所有层）。
+        计算单个逻辑 block 在 GPU 上占用的总字节数（用于 profiling）。
 
-        用法（在 profile_num_available_blocks 中替换原来的计算）：
+        内存模型：
+          m 个 raw int8 buffer，每个大小 = num_blocks × padded_page_size_bytes
+          padded_page_size_bytes = max(page_size_bytes across all groups)
 
-            # 先用 num_blocks=1 构建一个模板 config
-            template_config = KVCacheConfig(
-                num_blocks=1,
-                kv_cache_groups=[ ... ],  # 用真实 spec 填写
-            )
+          单 block 总占用 = group_size × padded_page_size_bytes
+
+        正确推导：
+          total_bytes = m × num_blocks × padded_page_size
+          bytes_per_block = total_bytes / num_blocks = m × padded_page_size
+          其中 m = group_size
+
+        注意：旧实现用 "Σ(num_layers_in_group × page_size_bytes)" 即 n×m×page_size，
+        是实际用量的 n 倍（n = num_groups），会导致 profiling 严重低估
+        num_available_blocks。
+
+        用法（在 profile_num_available_blocks 中）：
+            template_config = build_kv_cache_config(..., num_blocks=1)
             bytes_per_block = HybridCacheEngine.get_cache_block_size(template_config)
-            num_gpu_blocks = int(available_memory_bytes // bytes_per_block)
-
-        公式：
-            bytes_per_block = Σ_group ( len(group.layer_names) × spec.page_size_bytes )
+            num_gpu_blocks  = int(available_memory_bytes // bytes_per_block)
         """
-        total_bytes_per_block = 0
-        for group in kv_cache_config.kv_cache_groups:
-            spec = group.kv_cache_spec
-            num_layers_in_group = len(group.layer_names)
-            total_bytes_per_block += num_layers_in_group * spec.page_size_bytes
-        return total_bytes_per_block
+        groups = kv_cache_config.kv_cache_groups
+        if not groups:
+            return 0
+        # group_size = m（所有 group 大小相同）
+        group_size = len(groups[0].layer_names)
+        # padded_page_size = 各 group 中最大的 page_size_bytes
+        # 对于纯 Attention 模型：= 实际 page_size，无 padding overhead
+        # 对于 Attention+Mamba 模型：= Attention page_size（较大），Mamba 有填充字节
+        padded_page_size = max(g.kv_cache_spec.page_size_bytes for g in groups)
+        return group_size * padded_page_size
+
+        

@@ -20,7 +20,7 @@ _MODEL_REGISTRY = {
     "MistralForCausalLM": MinistralForCausalLM,     # Mistral-7B-v0.3 & ministral-8b
     "QWenLMHeadModel": QWenLMHeadModel,
     "YiForCausalLM": YiForCausalLM,
-    # "Gemma3ForConditionalGeneration": Gemma3ForCausalLM,   #add (gemma3-12b)
+    "Gemma3ForConditionalGeneration": Gemma3ForCausalLM,   #add (gemma3-12b)
     "Gemma2ForCausalLM": Gemma2ForCausalLM,          # gemma2-8b
 }
 

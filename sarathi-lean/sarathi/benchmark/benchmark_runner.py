@@ -69,7 +69,8 @@ class BenchmarkRunner:
         self._llm_engine = LLMEngine.from_engine_args(
             # replica config
             replica_id=replica_id,
-            replica_resource_mapping=replica_resource_mapping,
+            # replica_resource_mapping=replica_resource_mapping,
+            replica_resource_mapping=[("", 3)],
             output_dir=output_dir,
             # model config
             model=self._config.model_name,

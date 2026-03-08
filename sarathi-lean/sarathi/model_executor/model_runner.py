@@ -180,21 +180,46 @@ class ModelRunner:
         total_gpu_memory = get_gpu_memory()
         # print(f"peak_memory: {peak_memory}, total_gpu_memory: {total_gpu_memory}")
         physical_memory = int(total_gpu_memory * gpu_memory_utilization - peak_memory)
-        cache_block_size = get_cache_engine(self.model_config.attention_backend).get_cache_block_size(
-            block_size, self.model_config, self.parallel_config
-        )
-        num_gpu_blocks = int(
-            physical_memory // cache_block_size
-        )
+
+
+        if self.model_config.is_hybrid_model():
+            from sarathi.core.kv_cache_config_builder import build_kv_cache_config
+            from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
+            # num_blocks=1 仅用于计算单 block 字节数
+            template_config = build_kv_cache_config(
+                self.model_config, self.cache_config,
+                self.parallel_config, num_blocks=1,
+            )
+            cache_block_size = HybridCacheEngine.get_cache_block_size(template_config)
+        else:
+            cache_block_size = get_cache_engine(self.model_config.attention_backend, self.model_config).get_cache_block_size(
+                block_size, self.model_config, self.parallel_config
+            )
+
+        num_gpu_blocks = int(physical_memory // cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         torch.cuda.empty_cache()
-
         get_attention_wrapper().end_forward()
-
-        # Reset the seed to ensure that the random state is not affected by
-        # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, physical_memory
+
+
+        # cache_block_size = get_cache_engine(self.model_config.attention_backend).get_cache_block_size(
+        #     block_size, self.model_config, self.parallel_config
+        # )
+        # num_gpu_blocks = int(
+        #     physical_memory // cache_block_size
+        # )
+        # num_gpu_blocks = max(num_gpu_blocks, 0)
+        # torch.cuda.empty_cache()
+
+        # get_attention_wrapper().end_forward()
+
+        # # Reset the seed to ensure that the random state is not affected by
+        # # the model initialization and profiling.
+        # set_random_seed(self.model_config.seed)
+        # return num_gpu_blocks, physical_memory
+        
 
     def run(
         self,

@@ -43,6 +43,7 @@ models = {
     "Ministral-8B": {'tp': 1, 'hfrecord': 'mistralai/Ministral-8B-Instruct-2410', 'logentry': 'Ministral-8B'},
     # 'Llama-3.2-11B': {'tp': 1, 'hfrecord': 'meta-llama/Llama-3.2-11B-Vision-Instruct', 'logentry': 'Llama-3.2-11B'},
     "gemma-2-9b": {'tp': 1, 'hfrecord': 'google/gemma-2-9b', 'logentry': 'gemma-2-9b'},
+    "gemma-3-4b": {'tp': 1, 'hfrecord': 'google/gemma-3-4b-it', 'logentry': 'gemma-3-4b'},
 }
 
 # ================= 核心辅助函数 =================

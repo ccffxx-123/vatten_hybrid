@@ -7,9 +7,12 @@ from sarathi.transformers_utils.configs import *  # pylint: disable=wildcard-imp
 _CONFIG_REGISTRY = {
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
-    "falcon": RWConfig,  # For tiiuae/falcon-7b(-instruct)
+    "falcon": RWConfig,      # For tiiuae/falcon-7b(-instruct)
     "yi": YiConfig,
     "ministral": MinistralConfig,
+    # Gemma 3 is a multimodal model; we flatten text_config to a plain config
+    # so the rest of the engine can access num_hidden_layers etc. directly.
+    "gemma3": None,          # handled specially below
 }
 
 
@@ -20,7 +23,6 @@ def get_config(
         config = AutoConfig.from_pretrained(
             model, trust_remote_code=trust_remote_code, revision=revision
         )
-        print(f'config = {config}')
     except ValueError as e:
         if (
             not trust_remote_code
@@ -35,14 +37,19 @@ def get_config(
             raise RuntimeError(err_msg) from e
         else:
             raise e
-    # print(config.model_type)
+
+    # --- Gemma 3: flatten nested text_config to top level ---
+    if config.model_type == "gemma3":
+        print(f'config.model_type = {config.model_type}')
+        print(f'config = {config}')
+        return Gemma3TextConfig.from_gemma3_config(config)
 
     if config.model_type in _CONFIG_REGISTRY:
-        # print('----------------------------------------------11111111111')
         config_class = _CONFIG_REGISTRY[config.model_type]
         print(f'model = {model}')
         print(f'config_class = {config_class}')
         config = config_class.from_pretrained(model, revision=revision)
-        # print(config)    
 
+    print(f'config.model_type = {config.model_type}')
+    print(f'config = {config}')
     return config

@@ -265,10 +265,12 @@ class SequenceMetadata:
         seq: Sequence,
         block_table: Optional[List[int]],
         prompt_chunk_len: int,
+        block_tables=None,           # 新增第 1 行
     ) -> None:
         self.seq = seq
         self.block_table = block_table
         self.prompt_chunk_len = prompt_chunk_len
+        self.block_tables = block_tables   # 新增第 2 行
 
     @property
     def num_prompt_tokens(self) -> int:

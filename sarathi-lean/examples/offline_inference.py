@@ -36,8 +36,8 @@ llm_engine = LLMEngine.from_engine_args(
 
     # sliding attention
     # model="mistralai/Ministral-8B-Instruct-2410",   # 窗口，1024 * 32(32768) 3:1(32)
-    model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
-    # model="google/gemma-3-27b-it",       # 窗口1024  22:5 （适合）
+    # model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
+    model="google/gemma-3-4b-it",       # 窗口1024  22:5 （适合）
 
     # SSM-Transformer
     # model="ai21labs/AI21-Jamba-Mini-1.6",  # 28:4, 76，0
@@ -73,19 +73,20 @@ llm_engine = LLMEngine.from_engine_args(
     enable_chrome_trace=True, # 开启 Chrome Trace，生成性能分析图 (json文件)
     
     # --- Attention 后端 ---
-    attention_backend="fa_vattn",
-    # attention_backend="fa_paged",
+    # attention_backend="fa_vattn",
+    attention_backend="fa_paged",
     gpu_memory_utilization=0.9,
 
     # replica_resource_mapping=replica_resource_mapping,
 
-    block_size=2 * MB, # KV Cache 块大小
-    # block_size=256, # KV Cache 块大小
+    # block_size=2 * MB, # KV Cache 块大小
+    block_size=16, # KV Cache 块大小
 
     # max_num_batched_tokens=self._config.vllm_scheduler_max_tokens_in_batch,
     enable_op_level_metrics=False,
 
     load_format="dummy",
+    replica_resource_mapping=[("", 2)],  # 改这里，0→2
 )
 
 

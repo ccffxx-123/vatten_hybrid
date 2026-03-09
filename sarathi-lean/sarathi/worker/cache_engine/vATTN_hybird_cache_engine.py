@@ -101,7 +101,7 @@ class vATTNCacheEngine(BaseCacheEngine):
             attention layers or a single ``state_tensor`` for Mamba layers.
             The model forward pass uses ``kv_caches[layer_id]``.
         """
-        vattention.set_verbose(True)
+        # vattention.set_verbose(True)
         kv_tensors = vattention.init_kvcache(
             [self.num_layers_trans, self.num_layers_swa, self.num_layers_state],
             self.num_heads,       # num_kv_heads (from BaseCacheEngine)

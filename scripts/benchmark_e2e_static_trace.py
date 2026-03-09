@@ -42,8 +42,8 @@ experiment_dir = utils.static_experiment_dir
 if utils.args.test == True:
     # models, attention_backends = {'gemma-2-9b', 'Ministral-8B'}, ['fa_paged_256']
     # num_requests, context_lengths, pd_ratios = 100, [2048, 4096, 8192, 16384, 32768, 65536, 131072], [100] #
-    models, attention_backends = {'gemma-3-27b'}, ['fa_vattn_2mb']
-    num_requests, context_lengths, pd_ratios = 100, [2048, 4096, 8192, 16384, 32768, 65536, 131072], [100] #
+    models, attention_backends = {'gemma-2-9b'}, ['fa_vattn_2mb']
+    num_requests, context_lengths, pd_ratios = 1, [32768], [100] #
 else:
     # 正常模式下加载 utils 中定义的所有待测模型映射
     models = utils.models

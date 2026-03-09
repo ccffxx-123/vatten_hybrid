@@ -35,5 +35,5 @@ def cleanup_experiment_dirs(target_path, min_file_count=10):
 
 if __name__ == "__main__":
     # 请确保路径正确
-    path = "experiments/e2e_static_eval_page"
+    path = "experiments/e2e_static_eval_vatten_gemma3_27b"
     cleanup_experiment_dirs(path)

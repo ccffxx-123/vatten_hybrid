@@ -35,10 +35,6 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
         self.kv_page_indptr_tensor = None
         self.kv_last_page_len_tensor = None
 
-        # 新增：存储当前的注意力类型和滑动窗口大小
-        self._current_attention_type = "full_attention"
-        self._current_sliding_window = None
-
     def get_cache_block(self, num_blocks: int, **kwargs) -> torch.Tensor:
         return torch.randn(
             num_blocks,
@@ -52,7 +48,7 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
     def begin_forward(
         self,
         seq_metadata_list: List[SequenceMetadata],
-        # 新增参数：在 begin_forward 时指定注意力类型
+        # 新增参数
         attention_type: str = "full_attention",
         sliding_window: Optional[int] = None,
     ) -> None:
@@ -76,14 +72,6 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
         # indptr tensor for the kv_page_indices tensor. This tensor captures the start of each sequence
         # in the ragged tensor.
         kv_page_indptr: List[int] = [0]
-
-        # 存储当前的注意力配置
-        self._current_attention_type = attention_type
-        self._current_sliding_window = sliding_window
-        if attention_type == "sliding_window" and sliding_window is not None:
-            window_left = sliding_window
-        else:
-            window_left = -1
 
         self.is_profiling_iteration = False
         self.is_metadata_initialized = True
@@ -154,15 +142,11 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
             self.num_kv_heads,
             self.head_dim,
             self.block_size, # help above shows that it does not take the block_size arg anymore
-            window_left=window_left,  # 关键：传入滑动窗口参数
         )
 
     def end_forward(self):
         self._wrapper.end_forward()
         self.is_metadata_initialized = False
-        # 重置注意力配置
-        self._current_attention_type = "full_attention"
-        self._current_sliding_window = None
 
     def forward(
         self,
@@ -172,24 +156,8 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
         kv_cache: torch.Tensor,
         softmax_scale: float = 1.0,
         layer_id: Optional[int] = None,
-        # 新增参数（这里主要用于兼容接口，实际滑动窗口在 begin_forward 中已配置）
-        attention_type: str = "full_attention",
-        sliding_window: Optional[int] = None,
     ) -> torch.Tensor:
         assert self.is_metadata_initialized, "Metadata is not initialized."
-
-        # 可选：检查参数一致性
-        if attention_type != self._current_attention_type:
-            logger.warning(
-                f"attention_type mismatch: forward got {attention_type}, "
-                f"but begin_forward was called with {self._current_attention_type}"
-            )
-
-        # use_sliding_window = (attention_type == "sliding_window" and sliding_window is not None)
-        # if attention_type == "sliding_attention" and sliding_window:
-        #     window_left = sliding_window
-        # else:
-        #     window_left = -1
 
         if self.is_profiling_iteration:
             # there is no need to call attention in profiling mode
@@ -224,3 +192,4 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
             output = output.reshape(-1, self.num_q_heads * self.head_dim)
 
         return output
+

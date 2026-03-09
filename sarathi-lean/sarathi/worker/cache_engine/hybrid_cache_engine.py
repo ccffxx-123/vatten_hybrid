@@ -504,6 +504,9 @@ class HybridCacheEngine:
             f"group_size={self.group_size}"
         )
 
+    def preempt_requests(self, preempted_seq: List) -> None:
+        pass
+
 
 
 

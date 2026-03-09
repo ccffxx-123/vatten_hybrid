@@ -183,7 +183,7 @@ class ModelRunner:
         physical_memory = int(total_gpu_memory * gpu_memory_utilization - peak_memory)
 
 
-        if self.model_config.is_hybrid_model() and "page" in self.model_config.attention_backend:
+        if self.model_config.is_hybrid_model() and AttentionBackend.is_vLLM(self.model_config.attention_backend):
             from sarathi.core.kv_cache_config_builder import build_kv_cache_config
             from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
             # num_blocks=1 仅用于计算单 block 字节数

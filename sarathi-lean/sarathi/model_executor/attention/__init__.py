@@ -199,3 +199,18 @@ def is_attn_contiguous():
         AttentionBackend.FA_POD_MEGACACHE,
         AttentionBackend.FA_STREAMS_MEGACACHE,
     ]
+
+
+_mamba_wrapper_inst = None
+
+def get_mamba_wrapper():
+    """
+    返回全局 MambaWrapper 单例。
+    调用方式与 get_attention_wrapper() 完全对称。
+    """
+    global _mamba_wrapper_inst
+    if _mamba_wrapper_inst is None:
+        from sarathi.model_executor.attention.mamba_wrapper import MambaWrapper
+        _mamba_wrapper_inst = MambaWrapper()
+    return _mamba_wrapper_inst
+

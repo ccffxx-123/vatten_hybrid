@@ -23,6 +23,8 @@ from sarathi.model_executor.utils import pad_to_alignment
 from sarathi.utils import get_gpu_memory
 from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.model_executor.attention import AttentionBackend
+from sarathi.model_executor.attention import get_mamba_wrapper
+from sarathi.model_executor.attention import AttentionBackend
 logger = init_logger(__name__)
 
 USE_UVM = False
@@ -52,6 +54,22 @@ class ModelRunner:
             self.device,
         )
 
+        if model_config.is_hybrid_model():
+            # 确定 Mamba group 在 block_tables 中的下标
+            # build_kv_cache_config 按 trans → swa → state 顺序排列 group
+            layer_types = model_config.get_layer_type_list()
+            present     = set(layer_types)
+            # state group 排在 trans/swa 之后
+            mamba_group_idx = sum(1 for t in ("trans", "swa") if t in present)
+
+            get_mamba_wrapper().init(
+                model_config    = self.model_config,
+                parallel_config = self.parallel_config,
+                block_size      = cache_config.block_size,
+                device          = self.device,
+                mamba_group_idx = mamba_group_idx,
+            )
+
         self.sampler: Optional[Sampler] = None
         if self.model.lm_head:
             self.sampler = Sampler(
@@ -67,6 +85,8 @@ class ModelRunner:
         self._model_execution_e2e_timer = CpuTimer(
             CpuOperationMetrics.MODEL_EXECUTION_E2E, rank=self.rank
         )
+
+        
 
     def _prepare_inputs(
         self,
@@ -232,6 +252,9 @@ class ModelRunner:
             input_tokens, input_positions = self._prepare_inputs(seq_metadata_list)
 
         get_attention_wrapper().begin_forward(seq_metadata_list)
+
+        if self.model_config.is_hybrid_model():
+            get_mamba_wrapper().begin_forward(seq_metadata_list)
         
             
         with self._model_execution_e2e_timer:
@@ -253,5 +276,8 @@ class ModelRunner:
                 output = self.sampler(output, seq_metadata_list)
 
         get_attention_wrapper().end_forward()
+
+        if self.model_config.is_hybrid_model():
+            get_mamba_wrapper().end_forward()
 
         return output

@@ -38,12 +38,12 @@ llm_engine = LLMEngine.from_engine_args(
     # model="mistralai/Ministral-8B-Instruct-2410",   # 窗口，1024 * 32(32768) 3:1(32)
     # model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
     # model="google/gemma-3-4b-it",       # 窗口1024  29:5 
-    model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
+    # model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
 
     # SSM-Transformer
     # model="ai21labs/AI21-Jamba-Mini-1.6",  # 28:4, 76，0
     # model="ibm-ai-platform/Bamba-9B-v2",     # 29:3  20, 0
-    # model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
+    model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
 
     # SSM-Transformer-swa
     # model="microsoft/Phi-4-mini-flash-reasoning",  # full + SWA（嵌入Mamba（all 10 MB）） (Samba，适合)

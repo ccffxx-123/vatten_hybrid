@@ -200,6 +200,10 @@ class BaseWorker:
             self.model_config.get_num_layers(self.parallel_config)
         )
 
+        # gpu_cache[layer_idx] = (k_cache, v_cache)         ← Attention 层
+        #                      = (conv_state, ssm_state)     ← Mamba 层
+        #                         = None                        ← padding 层
+
         self.seq_manager = HybridWorkerSequenceManager(
             cache_config=self.cache_config,
             scheduler_config=self.scheduler_config,

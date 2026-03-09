@@ -38,7 +38,7 @@ llm_engine = LLMEngine.from_engine_args(
     # model="mistralai/Ministral-8B-Instruct-2410",   # 窗口，1024 * 32(32768) 3:1(32)
     # model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
     # model="google/gemma-3-4b-it",       # 窗口1024  29:5 
-    # model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
+    model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
 
     # SSM-Transformer
     # model="ai21labs/AI21-Jamba-Mini-1.6",  # 28:4, 76，0
@@ -50,11 +50,11 @@ llm_engine = LLMEngine.from_engine_args(
     # model="nvidia/Hymba-1.5B-Instruct",  # 相邻层共享KVclear
 
     # Transformer
-    model="meta-llama/Meta-Llama-3-8B",
+    # model="meta-llama/Meta-Llama-3-8B",
 
     
     
-    tensor_parallel_size=1,
+    tensor_parallel_size=2,
     pipeline_parallel_size=1, # 不使用流水线并行
     
     # 允许执行模型仓库里的远程代码 (某些非标准模型需要)
@@ -75,20 +75,22 @@ llm_engine = LLMEngine.from_engine_args(
     
     # --- Attention 后端 ---
     # attention_backend="fa_vattn",
-    attention_backend="fi_paged",
+    attention_backend="fa_paged",
+    # attention_backend="fi_paged",
     gpu_memory_utilization=0.9,
 
     # replica_resource_mapping=replica_resource_mapping,
 
     # block_size=2 * MB, # KV Cache 块大小
-    block_size=16, # KV Cache 块大小
+    block_size=256, # KV Cache 块大小
+    # block_size=16, # KV Cache 块大小
 
     # max_num_batched_tokens=self._config.vllm_scheduler_max_tokens_in_batch,
     enable_op_level_metrics=False,
 
     load_format="dummy",
-    replica_resource_mapping=[("", 3)],  # 改这里，0→2
-    # replica_resource_mapping=[("", 2), ("", 3)],  # 用 GPU 2 和 GPU 3
+    # replica_resource_mapping=[("", 3)],  # 改这里，0→2
+    replica_resource_mapping=[("", 2), ("", 3)],  # 用 GPU 2 和 GPU 3
 )
 
 

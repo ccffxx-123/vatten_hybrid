@@ -73,6 +73,7 @@ from sarathi.core.datatypes.kv_cache_spec import (
 )
 from sarathi.core.datatypes.sequence import SequenceMetadata
 from sarathi.logger import init_logger
+from sarathi.core.kv_cache_logger import kv_logger
 
 logger = init_logger(__name__)
 
@@ -298,9 +299,10 @@ class HybridCacheEngine:
                 f"不支持的 KVCacheSpec 类型: {type(spec).__name__}"
             )
 
+
     def _allocate_gpu_cache(
         self,
-    ) -> Tuple[GroupedCache, Dict[int, Tuple[int, int]]]:
+    ) -> Tuple['GroupedCache', Dict[int, Tuple[int, int]]]:
         """
         分配 m 个 raw int8 物理 buffer，并为每个 group 创建类型化视图。
 
@@ -341,8 +343,6 @@ class HybridCacheEngine:
             )
 
         # padded_page_size = 各 group 中最大的 page_size_bytes
-        # 对于纯 Attention 模型：max = 实际值，无 padding overhead
-        # 对于 Attention+Mamba 模型：Attention 的 page_size 更大，Mamba slot 后有填充字节
         padded_page_size = max(g.kv_cache_spec.page_size_bytes for g in groups)
         page_sizes = {g.kv_cache_spec.page_size_bytes for g in groups}
         if len(page_sizes) > 1:
@@ -354,6 +354,32 @@ class HybridCacheEngine:
 
         # 1. 分配 m 个 raw int8 物理 buffer
         raw_size = self.num_gpu_blocks * padded_page_size
+
+        # ── 修改：收集并打印 buffer 整体规划 ──
+        plan_log = [
+            f"\n{'='*60}",
+            f"[HybridCacheEngine] GPU 缓冲区规划:",
+            f"  num_blocks (逻辑 block 总数): {self.num_gpu_blocks}",
+            f"  group_size (= m, raw buffer 数量): {m}",
+            f"  num_groups (= n): {len(groups)}",
+            f"\n  各 group 的 page_size:"
+        ]
+        for i, g in enumerate(groups):
+            ps = g.kv_cache_spec.page_size_bytes
+            plan_log.append(f"    group[{i}] ({type(g.kv_cache_spec).__name__}): "
+                            f"{ps} bytes = {ps/1024:.2f} KB")
+
+        plan_log.extend([
+            f"\n  padded_page_size = max(上述) = "
+            f"{padded_page_size} bytes = {padded_page_size/1024:.2f} KB",
+            f"  raw_size (每个 buffer) = num_blocks × padded_page_size = "
+            f"{self.num_gpu_blocks} × {padded_page_size} = "
+            f"{raw_size} bytes = {raw_size/1024/1024:.2f} MB",
+            f"  总 GPU 占用 = m × raw_size = {m} × {raw_size/1024/1024:.2f} MB = "
+            f"{m * raw_size/1024/1024:.2f} MB"
+        ])
+        kv_logger.layout("\n".join(plan_log))
+
         raw_buffers: List[torch.Tensor] = [
             torch.zeros(raw_size, dtype=torch.int8, device="cuda")
             for _ in range(m)
@@ -364,15 +390,54 @@ class HybridCacheEngine:
             f"({self.num_gpu_blocks} blocks × {padded_page_size} bytes/block)"
         )
 
+        # ── 修改：打印每个 raw buffer ──
+        buf_log = ["\n  raw_buffers 分配完成:"]
+        for i, buf in enumerate(raw_buffers):
+            buf_log.append(f"    raw_buffer[{i}]: shape={buf.shape}, "
+                           f"dtype={buf.dtype}, device={buf.device}, "
+                           f"size={buf.numel()/1024/1024:.2f} MB")
+        kv_logger.layout("\n".join(buf_log))
+
+
         # 2. 为每个 group 创建类型化视图
         # gpu_cache[group_idx][buf_idx] = LayerCache
-        gpu_cache: GroupedCache = []
+        gpu_cache: 'GroupedCache' = []
         for g_idx, group in enumerate(groups):
-            group_cache: List[LayerCache] = []
+            group_cache: List['LayerCache'] = []
             spec = group.kv_cache_spec
+            
+            # ── 修改：收集并打印每个 group 的视图规划 ──
+            view_log = [
+                f"\n  group[{g_idx}] ({type(spec).__name__}) 视图创建:",
+                f"    block_stride = padded_page_size / dtype_size"
+            ]
+            
             for buf_idx in range(m):
                 view = self._reshape_for_spec(raw_buffers[buf_idx], spec, padded_page_size)
                 group_cache.append(view)
+                
+                layer_name = group.layer_names[buf_idx]
+                if isinstance(spec, (FullAttentionSpec, SlidingWindowSpec)):
+                    k_cache, v_cache = view
+                    view_log.append(f"    buffer[{buf_idx}] → 层'{layer_name}':")
+                    view_log.append(f"      k_cache: shape={tuple(k_cache.shape)}, "
+                                    f"dtype={k_cache.dtype}, stride={k_cache.stride()}")
+                    view_log.append(f"      v_cache: shape={tuple(v_cache.shape)}, "
+                                    f"dtype={v_cache.dtype}, stride={v_cache.stride()}")
+                    view_log.append(f"      k[block_id=0] 物理偏移: 0 bytes")
+                    
+                    # 提前算出偏移量，避免 f-string 内写太长导致可读性差
+                    v_offset = (spec.block_size * spec.num_kv_heads * spec.head_size * _dtype_size(spec.dtype))
+                    view_log.append(f"      v[block_id=0] 物理偏移: {v_offset} bytes")
+                    
+                elif isinstance(spec, MambaSpec):
+                    view_log.append(f"    buffer[{buf_idx}] → 层'{layer_name}':")
+                    for s_idx, state in enumerate(view):
+                        view_log.append(f"      state[{s_idx}]: shape={tuple(state.shape)}, "
+                                        f"dtype={state.dtype}, stride={state.stride()}")
+
+            kv_logger.layout("\n".join(view_log))
+            
             gpu_cache.append(group_cache)
             logger.debug(
                 f"group[{g_idx}]（{type(spec).__name__}）已创建 {m} 个类型化视图"
@@ -400,7 +465,23 @@ class HybridCacheEngine:
             f"{len(layer_to_cache_info)} 个真实层已映射，"
             f"{num_groups * m - len(layer_to_cache_info)} 个 padding slot 已跳过。"
         )
+        
+        # ── 修改：打印层→cache 映射表 ──
+        map_log = [
+            f"\n  layer_to_cache_info 映射表:",
+            f"  {'层下标':>6} | {'group_idx':>9} | {'buf_idx':>7} | 层名",
+            f"  {'-'*50}"
+        ]
+        for layer_idx in sorted(layer_to_cache_info.keys()):
+            g_idx, b_idx = layer_to_cache_info[layer_idx]
+            layer_name = groups[g_idx].layer_names[b_idx]
+            map_log.append(f"  {layer_idx:>6} | {g_idx:>9} | {b_idx:>7} | {layer_name}")
+        map_log.append(f"{'='*60}")
+        
+        kv_logger.layout("\n".join(map_log))
+
         return gpu_cache, layer_to_cache_info
+
 
     # ------------------------------------------------------------------
     # 运行时接口（与 BaseCacheEngine 兼容）

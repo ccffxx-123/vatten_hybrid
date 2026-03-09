@@ -57,6 +57,7 @@ from sarathi.core.datatypes.kv_cache_spec import (
     SlidingWindowSpec,
 )
 from sarathi.core.datatypes.sequence import Sequence
+from sarathi.core.kv_cache_logger import kv_logger
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ class BlockPool:
     """
     管理所有逻辑 block 的生命周期。
 
-    所有 SingleTypeKVCacheManager 共享同一个 BlockPool 实例，
+    所有 SingleTypeKVCachetablesHybridBlockSpaceManagerManager 共享同一个 BlockPool 实例，
     确保 block_id 在整个模型中全局唯一。
 
     block_id=0 保留为 null_block（占位符，永不分配给 request，
@@ -145,6 +146,14 @@ class BlockPool:
         for b in new_blocks:
             assert b.ref_cnt == 0, f"从 free_list 取出的 block {b} ref_cnt 不为 0"
             b.ref_cnt = 1
+
+        # ── 修改：使用 kv_logger.pool 替换 print ──
+        ids = [b.block_id for b in new_blocks]
+        kv_logger.pool(
+            f"[BlockPool] get_new_blocks: 申请 {num_blocks} 个 → ids={ids}, "
+            f"剩余 free={len(self.free_list)}"
+        )
+
         return new_blocks
 
     def free_blocks(self, blocks) -> None:
@@ -152,16 +161,24 @@ class BlockPool:
         归还一批 block。null_block 跳过；ref_cnt 降至 0 的 block 加入 free_list。
         传入的迭代器可以包含 null_block，会被自动忽略。
         """
+        freed_ids = []
         for block in blocks:
             if block.is_null:
                 continue
             block.ref_cnt -= 1
             if block.ref_cnt == 0:
                 self.free_list.append(block)
+                freed_ids.append(block.block_id)
+
+        # ── 修改：使用 kv_logger.pool 替换 print ──
+        if freed_ids:
+            kv_logger.pool(
+                f"[BlockPool] free_blocks: 归还 ids={freed_ids}, "
+                f"剩余 free={len(self.free_list)}"
+            )
 
     def get_num_free_blocks(self) -> int:
         return len(self.free_list)
-
 
 # ---------------------------------------------------------------------------
 # SingleTypeKVCacheManager —— 单类型层的 block 分配管理
@@ -178,8 +195,8 @@ class SingleTypeKVCacheManager:
 
     def __init__(
         self,
-        kv_cache_spec: KVCacheSpec,
-        block_pool: BlockPool,
+        kv_cache_spec: 'KVCacheSpec',
+        block_pool: 'BlockPool',
     ) -> None:
         self.kv_cache_spec = kv_cache_spec
         self.block_size: int = kv_cache_spec.block_size
@@ -187,7 +204,7 @@ class SingleTypeKVCacheManager:
         self._null_block = block_pool.null_block
 
         # request_id -> 当前 block 列表（含 null_block 占位）
-        self.req_to_blocks: Dict[str, List[KVCacheBlock]] = {}
+        self.req_to_blocks: Dict[str, List['KVCacheBlock']] = {}
 
     # ------------------------------------------------------------------
     # 容量查询
@@ -207,7 +224,7 @@ class SingleTypeKVCacheManager:
 
     def allocate_new_blocks(
         self, request_id: str, num_tokens: int
-    ) -> List[KVCacheBlock]:
+    ) -> List['KVCacheBlock']:
         """
         确保 request 拥有足够的 block 来容纳 num_tokens 个 token。
         只分配不足的部分，已有的 block 保持不变。
@@ -220,6 +237,16 @@ class SingleTypeKVCacheManager:
             return []
         new_blocks = self.block_pool.get_new_blocks(num_new)
         req_blocks.extend(new_blocks)
+
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"  [{type(self).__name__}] req={request_id}: "
+            f"num_tokens={num_tokens}, block_size={self.block_size}, "
+            f"num_required={num_required}, num_new={num_new}, "
+            f"new_ids={[b.block_id for b in new_blocks]}, "
+            f"all_ids={[b.block_id for b in req_blocks]}"
+        )
+
         return new_blocks
 
     # ------------------------------------------------------------------
@@ -242,7 +269,7 @@ class SingleTypeKVCacheManager:
 
         操作示意（SlidingWindow，block_size=4，window=8）：
         tokens:  [0,1,2,3] [4,5,6,7] [8,9,10,11]  已计算 11 个
-        window:              ^^^^^^^^ ^^^^^^^^^    last 8 tokens
+        window:             ^^^^^^^^ ^^^^^^^^^    last 8 tokens
         跳过的:  ^^^^^^^^^^^  → 替换为 null_block，free 掉
 
         result:  [NULL]     [block_5] [block_7]
@@ -260,7 +287,7 @@ class SingleTypeKVCacheManager:
         if num_skip_blocks <= 0:
             return
 
-        removed: List[KVCacheBlock] = []
+        removed: List['KVCacheBlock'] = []
         # 从最靠前的 block 开始往前找，直到遇到已是 null_block 的位置
         for i in range(num_skip_blocks - 1, -1, -1):
             if blocks[i] is self._null_block:
@@ -270,6 +297,16 @@ class SingleTypeKVCacheManager:
             blocks[i] = self._null_block  # 用占位符替换
 
         self.block_pool.free_blocks(removed)
+
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"  [{type(self).__name__}] req={request_id}: "
+            f"num_computed={num_computed_tokens}, "
+            f"num_skipped_tokens={num_skipped}, "
+            f"skip_blocks={num_skip_blocks}, "
+            f"removed_ids={[b.block_id for b in removed]}, "
+            f"remaining_ids={[b.block_id for b in blocks]}"
+        )
 
     # ------------------------------------------------------------------
     # 释放（request 完成或被抢占）
@@ -282,6 +319,9 @@ class SingleTypeKVCacheManager:
         """
         blocks = self.req_to_blocks.pop(request_id, [])
         self.block_pool.free_blocks(reversed(blocks))
+        
+        # 注：原代码中这里没有 print，但如果您想要完整的分配/释放追踪，
+        # 可以在这里加上：kv_logger.alloc(f"  [{type(self).__name__}] req={request_id} 已释放全部 blocks")
 
     # ------------------------------------------------------------------
     # 查询
@@ -373,6 +413,7 @@ def _create_manager(
 # HybridKVCacheCoordinator —— 跨 group 的分配协调
 # ---------------------------------------------------------------------------
 
+
 class HybridKVCacheCoordinator:
     """
     协调多个 SingleTypeKVCacheManager，统一对外提供分配接口。
@@ -390,10 +431,10 @@ class HybridKVCacheCoordinator:
     （除了 null_block 替换位置可能因窗口大小不同而有差异）。
     """
 
-    def __init__(self, kv_cache_config: KVCacheConfig) -> None:
+    def __init__(self, kv_cache_config: 'KVCacheConfig') -> None:
         self.kv_cache_config = kv_cache_config
         self.block_pool = BlockPool(kv_cache_config.num_blocks)
-        self.managers: List[SingleTypeKVCacheManager] = [
+        self.managers: List['SingleTypeKVCacheManager'] = [
             _create_manager(group.kv_cache_spec, self.block_pool)
             for group in kv_cache_config.kv_cache_groups
         ]
@@ -409,6 +450,9 @@ class HybridKVCacheCoordinator:
 
     def allocate(self, request_id: str, num_tokens: int) -> None:
         """在所有 group 中为 request 分配足够覆盖 num_tokens 的 block。"""
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(f"\n[Coordinator] allocate: req={request_id}, num_tokens={num_tokens}")
+        
         for manager in self.managers:
             manager.allocate_new_blocks(request_id, num_tokens)
 
@@ -416,11 +460,20 @@ class HybridKVCacheCoordinator:
         self, request_id: str, num_computed_tokens: int
     ) -> None:
         """通知所有 group 释放各自窗口之外的 block。"""
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"\n[Coordinator] remove_skipped: req={request_id}, "
+            f"num_computed={num_computed_tokens}"
+        )
+        
         for manager in self.managers:
             manager.remove_skipped_blocks(request_id, num_computed_tokens)
 
     def free(self, request_id: str) -> None:
         """在所有 group 中释放 request 持有的全部 block。"""
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(f"\n[Coordinator] free: req={request_id}")
+        
         for manager in self.managers:
             manager.free(request_id)
 
@@ -429,7 +482,12 @@ class HybridKVCacheCoordinator:
         返回每个 group 的 block_id 列表。
         result[group_id][block_idx] = block_id
         """
-        return [m.get_block_ids(request_id) for m in self.managers]
+        tables = [m.get_block_ids(request_id) for m in self.managers]
+        
+        # ── 修改：高频查询接口，使用 kv_logger.alloc_debug 替换 print ──
+        kv_logger.alloc_debug(f"[Coordinator] get_block_tables: req={request_id} → {tables}")
+        
+        return tables 
 
     def is_allocated(self, request_id: str) -> bool:
         return any(m.is_allocated(request_id) for m in self.managers)
@@ -441,6 +499,7 @@ class HybridKVCacheCoordinator:
 # ---------------------------------------------------------------------------
 # HybridBlockSpaceManager —— Scheduler 侧的对外接口
 # ---------------------------------------------------------------------------
+
 
 class HybridBlockSpaceManager:
     """
@@ -492,7 +551,7 @@ class HybridBlockSpaceManager:
 
     def __init__(
         self,
-        kv_cache_config: KVCacheConfig,
+        kv_cache_config: 'KVCacheConfig',
         max_model_len: int,
         watermark: float = 0.01,
     ) -> None:
@@ -507,7 +566,7 @@ class HybridBlockSpaceManager:
     # Scheduler 接口
     # ------------------------------------------------------------------
 
-    def can_allocate(self, seq: Sequence) -> bool:
+    def can_allocate(self, seq: 'Sequence') -> bool:
         """检查是否有足够空间为 seq 的全部 prompt token 分配 block。"""
         num_needed = self.coordinator.get_num_blocks_to_allocate(
             seq.seq_id, seq.get_len()
@@ -515,8 +574,15 @@ class HybridBlockSpaceManager:
         free = self.block_pool.get_num_free_blocks()
         return (free - num_needed) >= self.watermark_blocks
 
-    def allocate(self, seq: Sequence) -> None:
+    def allocate(self, seq: 'Sequence') -> None:
         """为新进入的 seq 分配 prompt 阶段所需的全部 block。"""
+        # ── 修改：将分隔符与主体日志合并，使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"\n{'='*60}\n"
+            f"[BlockSpaceManager] allocate: seq={seq.seq_id}, "
+            f"seq.get_len()={seq.get_len()}, "
+            f"free_blocks={self.block_pool.get_num_free_blocks()}"
+        )
         self.coordinator.allocate(seq.seq_id, seq.get_len())
 
     def can_append_slot(self) -> bool:
@@ -531,7 +597,7 @@ class HybridBlockSpaceManager:
         num_groups = len(self.coordinator.managers)
         return self.block_pool.get_num_free_blocks() >= num_groups
 
-    def append_slot(self, seq: Sequence) -> None:
+    def append_slot(self, seq: 'Sequence') -> None:
         """
         Decode 阶段新增一个 token 后调用：
         1. 先释放各 group 中注意力窗口之外的 block（可能腾出空间）
@@ -539,26 +605,45 @@ class HybridBlockSpaceManager:
 
         num_computed_tokens 传 seq.get_len() - 1：
         此时最新 token 已追加到 seq，get_len() 包含它，
-        但它尚未被"计算"（KV 尚未写入），所以 computed = total - 1。
+        但这尚未被"计算"（KV 尚未写入），所以 computed = total - 1。
         """
         total_tokens = seq.get_len()
+        
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"\n{'='*60}\n"
+            f"[BlockSpaceManager] append_slot: seq={seq.seq_id}, "
+            f"total_tokens={total_tokens}, "
+            f"free_blocks={self.block_pool.get_num_free_blocks()}"
+        )
+        
         # 先释放旧 block（释放后 free_blocks 增加，有助于后续分配）
         self.coordinator.remove_skipped_blocks(seq.seq_id, total_tokens - 1)
         # 再分配（如果最新 token 跨入新 block）
         self.coordinator.allocate(seq.seq_id, total_tokens)
 
-    def free(self, seq: Sequence) -> None:
+    def free(self, seq: 'Sequence') -> None:
         """Request 完成或被抢占时释放其持有的全部 block。"""
+        # ── 修改：使用 kv_logger.alloc 替换 print ──
+        kv_logger.alloc(
+            f"\n[BlockSpaceManager] free: seq={seq.seq_id}, "
+            f"free_before={self.block_pool.get_num_free_blocks()}"
+        )
         self.coordinator.free(seq.seq_id)
+        
+        kv_logger.alloc(
+            f"[BlockSpaceManager] free done: "
+            f"free_after={self.block_pool.get_num_free_blocks()}"
+        )
 
-    def is_allocated(self, seq: Sequence) -> bool:
+    def is_allocated(self, seq: 'Sequence') -> bool:
         return self.coordinator.is_allocated(seq.seq_id)
 
     # ------------------------------------------------------------------
     # Block Table 查询
     # ------------------------------------------------------------------
 
-    def get_block_table(self, seq: Sequence) -> List[int]:
+    def get_block_table(self, seq: 'Sequence') -> List[int]:
         """
         返回 group-0（通常是 Attention 组）的 block_id 列表。
         保持与 BaseBlockSpaceManager 的接口兼容。
@@ -566,7 +651,7 @@ class HybridBlockSpaceManager:
         tables = self.coordinator.get_block_tables(seq.seq_id)
         return tables[0] if tables else []
 
-    def get_block_tables(self, seq: Sequence) -> List[List[int]]:
+    def get_block_tables(self, seq: 'Sequence') -> List[List[int]]:
         """
         返回所有 group 的 block_id 列表。
         result[group_id] = List[int]

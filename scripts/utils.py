@@ -20,12 +20,12 @@ root = os.path.dirname(src)
 main = os.path.join(root, 'sarathi-lean', 'sarathi', 'benchmark', 'main.py')
 
 # 静态评估和动态评估的实验结果保存路径
-static_experiment_dir = os.path.join(root, 'experiments', 'e2e_static_eval_vatten_gemma3_27b')
-dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_vatten_gemma3_27b')
+static_experiment_dir = os.path.join(root, 'experiments', 'e2e_static_eval_gemma3_test_50_8192_4') # vatten_gemma3_27b  vatten_gemma3_27b
+dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_gemma3_4b_qps')
 
 # ================= 数据集配置 =================
 # 默认使用 arXiv 摘要数据集的预处理轨迹文件
-dataset_subpath = 'data/processed_traces/arxiv_summarization_filtered_stats_llama2_tokenizer.csv'
+dataset_subpath = 'artifact_asplos25/traces/arxiv_long_offline.csv'
 dataset_name = 'arxiv'
 
 # 动态追踪实验中上下文长度的上限（防止显存溢出或计算量过大）
@@ -44,7 +44,7 @@ models = {
     # 'Llama-3.2-11B': {'tp': 1, 'hfrecord': 'meta-llama/Llama-3.2-11B-Vision-Instruct', 'logentry': 'Llama-3.2-11B'},
     "gemma-2-9b": {'tp': 1, 'hfrecord': 'google/gemma-2-9b', 'logentry': 'gemma-2-9b'},
     "gemma-3-4b": {'tp': 1, 'hfrecord': 'google/gemma-3-4b-it', 'logentry': 'gemma-3-4b'},
-    "gemma-3-27b": {'tp': 4, 'hfrecord': 'google/gemma-3-27b-it', 'logentry': 'gemma-3-27b'},
+    "gemma-3-27b": {'tp': 2, 'hfrecord': 'google/gemma-3-27b-it', 'logentry': 'gemma-3-27b'},
 }
 
 # ================= 核心辅助函数 =================
@@ -129,8 +129,12 @@ def get_backend(attn_backend):
     elif 'fi_vattn' in low_backend:
         return 'fi_vattn_sync' if '_sync' in low_backend else 'fi_vattn'
     elif 'fa_paged' in low_backend:
+        if '_hybird' in low_backend:
+            return 'fa_paged_hybird'
         return 'fa_paged'
     elif 'fi_paged' in low_backend:
+        if '_hybird' in low_backend:
+            return 'fi_paged_hybird'
         return 'fi_paged'
     else:
         raise ValueError(f"不支持的注意力后端: {attn_backend}")

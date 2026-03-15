@@ -5,46 +5,37 @@ import utils       # 自定义工具模块，包含模型配置、路径获取�
 import torch
 
 # ================= 1. 核心实验配置 =================
-num_requests = 20      # 每个实验场景下发送的并发请求总数
+num_requests = 50      # 每个实验场景下发送的并发请求总数
 gpu_mem_util = 0.9     # GPU 显存占用率阈值（设为 0.9 表示允许模型框架占用 90% 的显存）
 
-# 定义待测试的注意力机制后端（包含 FlashAttention、PagedAttention 以及 vAttention 等不同变体）
-# fa = FlashAttention, fi = FlashInfer, paged = 分页管理, vattn = 虚拟注意力内存管理
+models = {'gemma-3-27b'}
+
 attention_backends = [
-    # 'fa_paged_256', 
-    # 'fi_paged_16', 
-    'fa_vattn_2mb', 
-    # 'fi_vattn_2mb', 
-    # 'fi_vattn_256kb'
+    'fi_paged_16', 
+    'fi_paged_hybird_16', 
+    'fi_vattn_2mb', 
 ]
 
-# 测试的上下文长度序列（从 32k 到 128k，专注于长文本推理测试）
 # context_lengths = [32768, 65536, 131072]
-context_lengths=[2048]
+context_lengths=[4096]
 # context_lengths=[2048 4096 8192 16384]
 
-# Chunk Size：Sarathi 调度器特有的参数（在当前代码中 vLLM 模式下暂未激活）
-chunk_size = 4096
-
-# 预填充-解码比例 (Prefill-to-Decode Ratio)
-# 用于模拟不同的推理负载特征：高比例倾向于首字延迟测试，低比例倾向于吞吐量测试
-pd_ratios = [100]
+pd_ratios = [4, 1]
 # pd_ratios = [500, 100, 50]
 
-# ================= 2. 路径与环境初始化 =================
-# 从 utils 获取项目源代码路径、根目录和主执行脚本路径
 src, root, main = utils.get_paths()
-# 实验结果输出的静态存储目录
 experiment_dir = utils.static_experiment_dir
+
+dtype="float16"
 
 # 快速测试模式：如果运行脚本时带了 --test 参数，则大幅缩减实验规模，用于验证流程是否通畅
 if utils.args.test == True:
     # models, attention_backends = {'gemma-2-9b', 'Ministral-8B'}, ['fa_paged_256']
-    # num_requests, context_lengths, pd_ratios = 100, [2048, 4096, 8192, 16384, 32768, 65536, 131072], [100] #
-    models, attention_backends = {'gemma-3-27b'}, ['fa_paged_256']
-    num_requests, context_lengths, pd_ratios = 100, [2048, 4096, 8192, 16384, 32768, 65536, 131072], [100] #gemma-3-4b
-else:
-    # 正常模式下加载 utils 中定义的所有待测模型映射
+    # num_requests, context_lengths, pd_ratios = 100, [131072], [100] #
+    models, attention_backends = {'gemma-3-27b'}, ['fi_paged_16']  #  
+    num_requests, context_lengths, pd_ratios = 50, [4096], [4] # gemma-3-4b , 16384, 32768, 65536, 131072
+else: #'fa_paged_256', 'fa_paged_hybird_256',   2048,4096,8192,  , 32768, 65536, 131072
+    # 正常模式下加载 utils 中定义的所有待测模型映射 ,  2048,4096,8192, 16384, 32768, 65536, 131072, 196608
     models = utils.models
 
 torch.cuda.memory._record_memory_history()
@@ -93,6 +84,8 @@ for model in models:
                     '--trace_request_length_generator_prefill_scale_factor', '1',
                     '--trace_request_length_generator_decode_scale_factor', '1',
 
+                    # '--dtype', f'{dtype}',
+
                     # '--replica_scheduler_max_batch_size', str(1), # 限制最大批次
                     '--replica_scheduler_max_batch_size', str(max_batch_size), # 限制最大批次
 
@@ -118,3 +111,4 @@ for model in models:
                     # 如果实验失败（例如显存溢出 OOM），打印错误并直接跳过，继续执行下一个配置
                     print(f"Experiment failed with error: {e}")
                     continue
+

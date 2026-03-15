@@ -12,6 +12,7 @@ from sarathi.model_executor.models import *  # pylint: disable=wildcard-import
 from sarathi.model_executor.weight_utils import initialize_dummy_weights
 
 
+
 # TODO(woosuk): Lazy-load the model classes.
 _MODEL_REGISTRY = {
     "FalconForCausalLM": FalconForCausalLM,
@@ -22,6 +23,7 @@ _MODEL_REGISTRY = {
     "YiForCausalLM": YiForCausalLM,
     "Gemma3ForConditionalGeneration": Gemma3ForCausalLM,   #add (gemma3-12b)
     "Gemma2ForCausalLM": Gemma2ForCausalLM,          # gemma2-8b
+    "NemotronHForCausalLM": NemotronHForCausalLM,
 }
 
 

@@ -91,6 +91,13 @@ class TraceRequestLengthGenerator(BaseRequestLengthGenerator):
         self._trace_df = self._trace_df.sample(frac=1, random_state=self._config.seed)
         self._next_request_idx = 0
 
+        # print("\n" + "="*60)
+        # print(f"[DEBUG] 随机种子 (Seed): {self._config.seed}")
+        # print("[DEBUG] 最终发送给系统的请求序列 (前 10 个):")
+        # # 只提取我们最关心的 prefill 和 decode 长度列，使用 head(10) 查看前 10 行
+        # print(self._trace_df[['num_prefill_tokens', 'num_decode_tokens']].head(10).to_string(index=False))
+        # print("="*60 + "\n")
+
     def get_next_num_tokens(self) -> Tuple[float, float]:
         if self._next_request_idx >= len(self._trace_df):
             self._next_request_idx = 0

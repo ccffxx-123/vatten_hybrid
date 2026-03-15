@@ -1,9 +1,0 @@
-# ninja log v7
-1	33870	1772700189727682470	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/pos_encoding.o	3220a7a9e52231c1
-1	77678	1772700189727682470	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/pos_encoding_kernels.o	981b95cd73161703
-3	32609	1772700268129653966	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/layernorm.o	b53fe4889f446bd7
-3	79530	1772700268129653966	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/layernorm_kernels.o	de981e873de33dca
-3	33114	1772700348439584631	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/activation.o	ec142a1fafdd6cb6
-3	78808	1772700348439584631	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/activation_kernels.o	5e7864f8eb195ef1
-4	35289	1772700428089557217	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache.o	eff652c41fae7f65
-4	85640	1772700428089557217	/workspace/vatten_hybrid/sarathi-lean/build/temp.linux-x86_64-3.10/csrc/cache_kernels.o	db4ba03833e2d9a

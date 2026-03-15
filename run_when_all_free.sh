@@ -34,7 +34,7 @@ while true; do
         export CUDA_VISIBLE_DEVICES=0,1,2,3
         
         # 运行你的评测程序
-        python scripts/benchmark_e2e_static_trace.py --test
+        python scripts/benchmark_e2e_dynamic_trace.py
         
         echo "[$(date)] Benchmark 运行完毕，退出监控。"
         exit 0

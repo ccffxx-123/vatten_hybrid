@@ -54,6 +54,7 @@ class vLLMCacheEngine(BaseCacheEngine):
         value_cache_block = key_cache_block
         total = num_layers * (key_cache_block + value_cache_block)
         dtype_size = _get_dtype_size(model_config.dtype)
+        logger.info(f"# block_size: {block_size}, num_heads: {num_heads}, head_size: {head_size}, num_layers: {num_layers}, total: {total}, dtype_size: {dtype_size}")
         return dtype_size * total
 
     def step(self, seq_metadata_list: List[SequenceMetadata]) -> None:

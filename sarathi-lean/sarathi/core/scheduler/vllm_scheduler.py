@@ -10,12 +10,8 @@ from sarathi.core.datatypes.sequence import Sequence, SequenceScheduleMetadata
 from sarathi.core.scheduler.base_scheduler import BaseScheduler
 from sarathi.logger import init_logger
 from sarathi.model_executor.attention import is_vattention_backend
-# from sarathi.core.block_space_manager.vattention_block_space_manager import (
-#     vAttentionBlockSpaceManager
-# )
-from sarathi.core.block_space_manager.vattention_hybird_block_space_manager import (
-    vAttentionBlockSpaceManager
-)
+# from sarathi.core.block_space_manager.vattention_block_space_manager import vAttentionBlockSpaceManager
+from sarathi.core.block_space_manager.vattention_hybird_block_space_manager import vAttentionBlockSpaceManager
 
 logger = init_logger(__name__)
 

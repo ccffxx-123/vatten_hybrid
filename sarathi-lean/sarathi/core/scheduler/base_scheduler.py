@@ -65,7 +65,7 @@ class BaseScheduler(ABC):
                 parallel_config,
             )
         else:
-            if model_config.is_hybrid_model():
+            if model_config.is_hybrid_model() and AttentionBackend.is_vLLM_hybird(attn_cfg):
                 from sarathi.core.kv_cache_config_builder import build_kv_cache_config
                 from sarathi.core.block_space_manager.hybrid_block_space_manager import (
                     HybridBlockSpaceManager,

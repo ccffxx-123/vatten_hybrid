@@ -219,6 +219,7 @@ class vATTNCacheEngine(BaseCacheEngine):
             torch.tensor(b_idx_gen, dtype=torch.int32, device=self.device),
         )
 
+
     def on_step_completion(self, seq_metadata_list: List[SequenceMetadata]) -> None:
         for seq_metadata in seq_metadata_list:
             if seq_metadata.seq.is_finished():
@@ -308,28 +309,29 @@ class vATTNCacheEngine(BaseCacheEngine):
         count), so we amortise it over ``block_size`` tokens to keep the
         profiling arithmetic consistent.
         """
-        head_size = model_config.get_head_size()
-        num_heads = model_config.get_num_kv_heads(parallel_config)
-        dtype_size = torch.tensor([], dtype=model_config.dtype).element_size()
+        # head_size = model_config.get_head_size()
+        # num_heads = model_config.get_num_kv_heads(parallel_config)
+        # dtype_size = torch.tensor([], dtype=model_config.dtype).element_size()
 
-        # Per-token KV cost for one layer (K + V)
-        kv_per_token_per_layer = 2 * num_heads * head_size * dtype_size
+        # # Per-token KV cost for one layer (K + V)
+        # kv_per_token_per_layer = 2 * num_heads * head_size * dtype_size
 
-        n_trans, n_swa, n_state = model_config.get_num_layers_by_type()
+        # n_trans, n_swa, n_state = model_config.get_num_layers_by_type()
 
-        # Transformer + SWA: token-proportional
-        attn_layers = n_trans + n_swa
-        token_cost = block_size * kv_per_token_per_layer * attn_layers
+        # # Transformer + SWA: token-proportional
+        # attn_layers = n_trans + n_swa
+        # token_cost = block_size * kv_per_token_per_layer * attn_layers
 
-        # Mamba state: fixed per request, amortised
-        if n_state > 0:
-            hidden = model_config.get_hidden_size()
-            d_state = model_config.get_d_state() if hasattr(model_config, "get_d_state") else 0
-            state_cost = hidden * d_state * n_state * dtype_size
-            # Spread across block_size tokens so the profiler divides evenly
-            # (conservative: counts one request's state per block)
-            token_cost += state_cost
+        # # Mamba state: fixed per request, amortised
+        # if n_state > 0:
+        #     hidden = model_config.get_hidden_size()
+        #     d_state = model_config.get_d_state() if hasattr(model_config, "get_d_state") else 0
+        #     state_cost = hidden * d_state * n_state * dtype_size
+        #     # Spread across block_size tokens so the profiler divides evenly
+        #     # (conservative: counts one request's state per block)
+        #     token_cost += state_cost
 
+        token_cost = 2 * 1024 * 1024
         return token_cost
 
     # ------------------------------------------------------------------
@@ -340,5 +342,5 @@ class vATTNCacheEngine(BaseCacheEngine):
         vattention.cleanup()
 
     def show_allocator_state(self):
-        vattention.set_verbose(True)
+        # vattention.set_verbose(True)
         vattention.show_allocator_state()

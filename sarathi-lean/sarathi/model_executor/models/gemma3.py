@@ -1,19 +1,21 @@
 # coding=utf-8
-# Adapted for Gemma 3 text-only inference in the Sarathi engine.
-# Gemma 3 uses a hybrid attention pattern: sliding window (local) attention
-# alternates with full (global) attention according to `layer_types` in the
-# text_config.  Vision / multimodal weights are completely ignored.
+# Gemma 3 text-only model for the Sarathi inference engine.
 #
-# Key architectural differences vs LLaMA:
-#   - head_dim is specified independently (not hidden_size // num_heads)
-#   - query_pre_attn_scalar replaces head_dim**-0.5 as the softmax scale
-#   - Two RoPE bases: rope_local_base_freq for sliding layers,
-#     rope_theta for global layers (with rope_scaling applied)
-#   - GeGLU activation (gelu_pytorch_tanh gate × up projection)
-#   - Four layer norms per decoder layer (pre/post attention, pre/post FFN)
-#   - layer_types list drives per-layer attention_type + sliding_window args
+# Gemma 3 is a multimodal model, but we only implement the text (language)
+# portion here.  Vision encoder weights are ignored during loading.
+#
+# Key architectural differences vs Gemma 2:
+#   1. Dual RoPE – global-attention layers use rope_theta (1 000 000),
+#      sliding-window layers use rope_local_base_freq (10 000).
+#   2. No attention or final-logit softcapping.
+#   3. query_pre_attn_scalar = 168 (configurable).
+#   4. Layer pattern: every 6th layer is full_attention; the rest are
+#      sliding_attention (configurable via layer_types).
+#   5. HF checkpoint keys live under a ``language_model.`` prefix because
+#      the original model is Gemma3ForConditionalGeneration.
+#   6. Linear RoPE scaling (factor = 8) for the global-attention RoPE.
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -22,6 +24,7 @@ from torch import nn
 from sarathi.metrics.constants import OperationMetrics
 from sarathi.metrics.cuda_timer import CudaTimer
 from sarathi.model_executor.attention import get_attention_wrapper
+from sarathi.model_executor.layers.activation import get_act_fn
 from sarathi.model_executor.layers.layernorm import RMSNorm
 from sarathi.model_executor.layers.rotary_embedding import get_rope
 from sarathi.model_executor.parallel_utils.parallel_state import (
@@ -39,59 +42,169 @@ from sarathi.model_executor.parallel_utils.tensor_parallel import (
     VocabParallelEmbedding,
 )
 from sarathi.model_executor.weight_utils import (
+    convert_pyslice_to_tensor,
     hf_model_weights_iterator,
     load_padded_tensor_parallel_vocab,
     load_tensor_parallel_weights,
 )
 from sarathi.worker.cache_engine import KVCache
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_rope_scaling(config_rope_scaling: Optional[Dict]) -> Optional[Dict]:
-    """Normalise the rope_scaling dict so get_rope() can consume it.
-
-    Handles all observed key variants from different transformers versions:
-      - rope_type  (HF Gemma3 raw)
-      - type       (already normalised)
-      - neither    (transformers may strip it; default to "linear")
-    """
-    if config_rope_scaling is None:
-        return None
-    rs = dict(config_rope_scaling)
-    # Normalise rope_type -> type
-    if "rope_type" in rs and "type" not in rs:
-        rs["type"] = rs.pop("rope_type")
-    # If transformers stripped the type key entirely, default to linear
-    if "type" not in rs:
-        rs["type"] = "linear"
-    # Ensure factor exists (required by sarathi's get_rope and config.py)
-    if "factor" not in rs:
-        rs["factor"] = 1.0
-    return rs
+# Try importing the fused RMSNorm CUDA kernel.
+try:
+    from sarathi import layernorm_ops
+    HAS_FUSED_LAYERNORM = True
+except ImportError:
+    HAS_FUSED_LAYERNORM = False
 
 
 # ---------------------------------------------------------------------------
-# MLP  (GeGLU: GELU(gate_proj(x)) * up_proj(x) → down_proj)
+# Configuration helper
+# ---------------------------------------------------------------------------
+
+class Gemma3Config:
+    """Lightweight config wrapper – extracts all text-related fields from the
+    flattened ``Gemma3TextConfig`` produced by
+    ``sarathi.transformers_utils.configs.gemma3``."""
+
+    def __init__(self, hf_config):
+        self.vocab_size = getattr(hf_config, "vocab_size", 262208)
+        self.hidden_size = getattr(hf_config, "hidden_size", 5376)
+        self.intermediate_size = getattr(hf_config, "intermediate_size", 21504)
+        self.num_hidden_layers = getattr(hf_config, "num_hidden_layers", 62)
+        self.num_attention_heads = getattr(hf_config, "num_attention_heads", 32)
+        self.num_key_value_heads = getattr(hf_config, "num_key_value_heads", 16)
+        self.head_dim = getattr(hf_config, "head_dim", 128)
+        self.hidden_act = getattr(
+            hf_config,
+            "hidden_activation",
+            getattr(hf_config, "hidden_act", "gelu_pytorch_tanh"),
+        )
+        self.max_position_embeddings = getattr(
+            hf_config, "max_position_embeddings", 131072
+        )
+        self.rms_norm_eps = getattr(hf_config, "rms_norm_eps", 1e-6)
+        self.attention_bias = getattr(hf_config, "attention_bias", False)
+        self.attention_dropout = getattr(hf_config, "attention_dropout", 0.0)
+
+        # Gemma 3 specific ---------------------------------------------------
+        self.query_pre_attn_scalar = getattr(
+            hf_config, "query_pre_attn_scalar", 168
+        )
+        self.sliding_window = getattr(hf_config, "sliding_window", 1024)
+
+        # No softcapping in Gemma 3.
+        self.attn_logit_softcapping = None
+        self.final_logit_softcapping = None
+
+        # Global RoPE (for full-attention layers).
+        self.rope_theta = getattr(hf_config, "rope_theta", 1_000_000.0)
+        # Local RoPE (for sliding-window layers).
+        self.rope_local_base_freq = getattr(
+            hf_config, "rope_local_base_freq", 10_000.0
+        )
+
+        # RoPE scaling (linear factor = 8 for the global RoPE).
+        raw_rs = getattr(hf_config, "rope_scaling", None)
+        if isinstance(raw_rs, dict):
+            rs = dict(raw_rs)
+            # HF uses ``rope_type``; ``get_rope()`` expects ``type``.
+            if "rope_type" in rs and "type" not in rs:
+                rs["type"] = rs.pop("rope_type")
+            self.rope_scaling = rs
+        else:
+            self.rope_scaling = raw_rs
+
+        # Layer types – list of "sliding_attention" / "full_attention".
+        self.layer_types = getattr(hf_config, "layer_types", None)
+        if self.layer_types is None:
+            pattern = getattr(hf_config, "sliding_window_pattern", 6)
+            self.layer_types = []
+            for i in range(self.num_hidden_layers):
+                if (i + 1) % pattern == 0:
+                    self.layer_types.append("full_attention")
+                else:
+                    self.layer_types.append("sliding_attention")
+
+
+# ---------------------------------------------------------------------------
+# Gemma 3 RMSNorm  (weight + 1, same convention as Gemma 2)
+# ---------------------------------------------------------------------------
+
+class Gemma3RMSNorm(nn.Module):
+    """Gemma-style RMSNorm where the stored weight is the *offset* from 1."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        eps: float = 1e-6,
+        norm_name: Optional[str] = None,
+        layer_id: Optional[int] = None,
+    ) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(hidden_size))
+        self.variance_epsilon = eps
+        self._norm_timer = CudaTimer(norm_name, layer_id=layer_id)
+        self.register_buffer(
+            "effective_weight", torch.ones(hidden_size), persistent=False
+        )
+        self._weight_prepared = False
+
+    def _prepare_weight(self):
+        if not self._weight_prepared:
+            self.effective_weight.copy_(self.weight.data + 1.0)
+            self._weight_prepared = True
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self._weight_prepared:
+            self._prepare_weight()
+        with self._norm_timer:
+            if HAS_FUSED_LAYERNORM:
+                out = torch.empty_like(x)
+                layernorm_ops.rms_norm(
+                    out, x, self.effective_weight, self.variance_epsilon
+                )
+                return out
+            else:
+                if x.dtype in (torch.float16, torch.bfloat16):
+                    input_dtype = x.dtype
+                    x = x.float()
+                    variance = x.pow(2).mean(-1, keepdim=True)
+                    x = x * torch.rsqrt(variance + self.variance_epsilon)
+                    return (self.effective_weight * x).to(input_dtype)
+                else:
+                    variance = x.pow(2).mean(-1, keepdim=True)
+                    x = x * torch.rsqrt(variance + self.variance_epsilon)
+                    return self.effective_weight * x
+
+
+# ---------------------------------------------------------------------------
+# MLP
 # ---------------------------------------------------------------------------
 
 class Gemma3MLP(nn.Module):
-    """Feed-forward block with GeGLU activation (gelu_pytorch_tanh variant)."""
+    """Gated MLP with GELU(tanh) activation."""
 
     def __init__(
         self,
         hidden_size: int,
         intermediate_size: int,
+        hidden_act: str,
         layer_id: Optional[int] = None,
     ) -> None:
         super().__init__()
-        # gate_proj and up_proj are fused into a single ColumnParallelLinear
-        # (output is 2 × intermediate_size; we split in forward)
-        self.gate_up_proj = ColumnParallelLinear(
+        self.gate_proj = ColumnParallelLinear(
             hidden_size,
-            2 * intermediate_size,
+            intermediate_size,
+            bias=False,
+            gather_output=False,
+            perform_initialization=False,
+            linear_metric_name=OperationMetrics.MLP_UP_PROJ,
+            communication_metric_name=OperationMetrics.MLP_UP_PROJ_ALL_GATHER,
+            layer_id=layer_id,
+        )
+        self.up_proj = ColumnParallelLinear(
+            hidden_size,
+            intermediate_size,
             bias=False,
             gather_output=False,
             perform_initialization=False,
@@ -109,18 +222,23 @@ class Gemma3MLP(nn.Module):
             communication_metric_name=OperationMetrics.MLP_DOWN_PROJ_ALL_REDUCE,
             layer_id=layer_id,
         )
-        self._activation_timer = CudaTimer(
+
+        if hidden_act == "gelu_pytorch_tanh":
+            self.act_fn = nn.GELU(approximate="tanh")
+        else:
+            self.act_fn = get_act_fn(hidden_act)
+
+        self._mlp_activation_timer = CudaTimer(
             OperationMetrics.MLP_ACTIVATION, layer_id=layer_id
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        gate_up, _ = self.gate_up_proj(x)
-        gate, up = gate_up.chunk(2, dim=-1)
-        with self._activation_timer:
-            # GeGLU: GELU(gate) ⊗ up  (tanh approximation matches HF impl)
-            hidden = F.gelu(gate, approximate="tanh") * up
-        out, _ = self.down_proj(hidden)
-        return out
+        gate_output, _ = self.gate_proj(x)
+        up_output, _ = self.up_proj(x)
+        with self._mlp_activation_timer:
+            x = self.act_fn(gate_output) * up_output
+        x, _ = self.down_proj(x)
+        return x
 
 
 # ---------------------------------------------------------------------------
@@ -128,11 +246,7 @@ class Gemma3MLP(nn.Module):
 # ---------------------------------------------------------------------------
 
 class Gemma3Attention(nn.Module):
-    """Single attention layer for Gemma 3.
-
-    Supports both ``full_attention`` and ``sliding_attention`` modes; the
-    mode is chosen at construction time from ``layer_types[layer_id]``.
-    """
+    """Multi-head attention with per-layer RoPE base frequency selection."""
 
     def __init__(
         self,
@@ -140,46 +254,70 @@ class Gemma3Attention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         head_dim: int,
-        # Global-attention RoPE params
-        rope_theta: float,
-        rope_scaling: Optional[Dict],
-        # Local-attention RoPE params
-        rope_local_base_freq: float,
-        max_position_embeddings: int,
         query_pre_attn_scalar: float,
-        attention_type: str = "full_attention",
-        sliding_window: Optional[int] = None,
+        sliding_window: Optional[int],
+        attention_type: str,
+        rope_theta: float,
+        rope_local_base_freq: float,
+        rope_scaling: Optional[Dict[str, Any]],
+        max_position_embeddings: int,
+        attention_bias: bool = False,
         layer_id: Optional[int] = None,
     ) -> None:
         super().__init__()
+        self.hidden_size = hidden_size
+        self.head_dim = head_dim
+        self.attention_type = attention_type
+        self.sliding_window = (
+            sliding_window if attention_type == "sliding_attention" else None
+        )
+        self.layer_id = layer_id
 
         tp_size = get_tensor_model_parallel_world_size()
 
-        self.hidden_size = hidden_size
         self.total_num_heads = num_heads
-        self.total_num_kv_heads = num_kv_heads
-        self.head_dim = head_dim
-
         assert self.total_num_heads % tp_size == 0
-        assert self.total_num_kv_heads % tp_size == 0
         self.num_heads = self.total_num_heads // tp_size
-        self.num_kv_heads = self.total_num_kv_heads // tp_size
+
+        self.total_num_kv_heads = num_kv_heads
+        if self.total_num_kv_heads >= tp_size:
+            assert self.total_num_kv_heads % tp_size == 0
+            self.num_kv_heads = self.total_num_kv_heads // tp_size
+        else:
+            assert tp_size % self.total_num_kv_heads == 0
+            self.num_kv_heads = 1
 
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
 
-        # Gemma 3 uses a fixed scalar instead of head_dim**-0.5
-        self.scaling = 1.0 / (query_pre_attn_scalar ** 0.5)
+        # Gemma 3 uses query_pre_attn_scalar for scaling.
+        self.scaling = query_pre_attn_scalar ** -0.5
 
-        self.attention_type = attention_type
-        self.sliding_window = sliding_window if attention_type == "sliding_attention" else None
-        self.layer_id = layer_id
-
-        # QKV projection (fused)
-        self.qkv_proj = ColumnParallelLinear(
+        # ----- Projections -----
+        self.q_proj = ColumnParallelLinear(
             hidden_size,
-            (self.total_num_heads + 2 * self.total_num_kv_heads) * self.head_dim,
-            bias=False,
+            self.total_num_heads * self.head_dim,
+            bias=attention_bias,
+            gather_output=False,
+            perform_initialization=False,
+            linear_metric_name=OperationMetrics.ATTN_PRE_PROJ,
+            communication_metric_name=OperationMetrics.ATTN_PRE_PROJ_ALL_GATHER,
+            layer_id=layer_id,
+        )
+        self.k_proj = ColumnParallelLinear(
+            hidden_size,
+            self.total_num_kv_heads * self.head_dim,
+            bias=attention_bias,
+            gather_output=False,
+            perform_initialization=False,
+            linear_metric_name=OperationMetrics.ATTN_PRE_PROJ,
+            communication_metric_name=OperationMetrics.ATTN_PRE_PROJ_ALL_GATHER,
+            layer_id=layer_id,
+        )
+        self.v_proj = ColumnParallelLinear(
+            hidden_size,
+            self.total_num_kv_heads * self.head_dim,
+            bias=attention_bias,
             gather_output=False,
             perform_initialization=False,
             linear_metric_name=OperationMetrics.ATTN_PRE_PROJ,
@@ -189,7 +327,7 @@ class Gemma3Attention(nn.Module):
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
-            bias=False,
+            bias=attention_bias,
             input_is_parallel=True,
             perform_initialization=False,
             linear_metric_name=OperationMetrics.ATTN_POST_PROJ,
@@ -197,32 +335,41 @@ class Gemma3Attention(nn.Module):
             layer_id=layer_id,
         )
 
-        # Gemma 3 uses different RoPE bases for local vs global layers.
+        # ----- QK Normalization -----
+        # Gemma 3 replaces Gemma 2's soft-capping with QK-norm:
+        # RMSNorm applied per-head to Q and K after projection, before RoPE.
+        # Uses the Gemma convention (stored weight is offset, effective = weight + 1).
+        self.q_norm = Gemma3RMSNorm(self.head_dim, eps=1e-6)
+        self.k_norm = Gemma3RMSNorm(self.head_dim, eps=1e-6)
+
+        # ----- RoPE -----
+        # Gemma 3 uses *two* different RoPE base frequencies:
+        #   • sliding-window layers → rope_local_base_freq (default 10 000)
+        #     with NO rope scaling
+        #   • full-attention layers → rope_theta (default 1 000 000)
+        #     with linear scaling (factor 8)
         if attention_type == "sliding_attention":
-            # Local layers: small base, no long-range scaling
             self.rotary_emb = get_rope(
                 head_size=self.head_dim,
                 rotary_dim=self.head_dim,
                 max_position=max_position_embeddings,
                 base=int(rope_local_base_freq),
                 is_neox_style=True,
-                rope_scaling=None,
+                rope_scaling=None,  # No scaling for local RoPE
             )
         else:
-            # Global layers: large base + linear scaling (factor=8 for Gemma3-27B).
-            # Re-run _make_rope_scaling here as a final safety net in case
-            # transformers modified the dict between config construction and now.
-            safe_rope_scaling = _make_rope_scaling(rope_scaling)
             self.rotary_emb = get_rope(
                 head_size=self.head_dim,
                 rotary_dim=self.head_dim,
                 max_position=max_position_embeddings,
                 base=int(rope_theta),
                 is_neox_style=True,
-                rope_scaling=safe_rope_scaling,
+                rope_scaling=rope_scaling,  # Linear scaling for global RoPE
             )
 
-        self._attn_rope_timer = CudaTimer(OperationMetrics.ATTN_ROPE, layer_id=layer_id)
+        self._attn_rope_timer = CudaTimer(
+            OperationMetrics.ATTN_ROPE, layer_id=layer_id
+        )
 
     def forward(
         self,
@@ -230,11 +377,25 @@ class Gemma3Attention(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        q, _ = self.q_proj(hidden_states)
+        k, _ = self.k_proj(hidden_states)
+        v, _ = self.v_proj(hidden_states)
+
+        # QK-norm: reshape to per-head, apply RMSNorm, reshape back.
+        # q shape: [num_tokens, num_heads * head_dim]
+        # k shape: [num_tokens, num_kv_heads * head_dim]
+        # NOTE: Gemma3RMSNorm (and its fused CUDA kernel) expects 2D input.
+        # We reshape to [num_tokens * num_heads, head_dim] so the kernel
+        # normalizes over head_dim for each (token, head) pair independently.
+        num_tokens = q.shape[0]
+
+        q = self.q_norm(q.view(-1, self.head_dim)).view(num_tokens, -1)
+        k = self.k_norm(k.view(-1, self.head_dim)).view(num_tokens, -1)
 
         with self._attn_rope_timer:
             q, k = self.rotary_emb(positions, q, k)
+
+        # print( f'q.shape, k.shape, v.shape = {q.shape}, {k.shape}, {v.shape}')
 
         attn_output = get_attention_wrapper().forward(
             q,
@@ -246,68 +407,74 @@ class Gemma3Attention(nn.Module):
             attention_type=self.attention_type,
             sliding_window=self.sliding_window,
         )
+
         output, _ = self.o_proj(attn_output)
         return output
 
 
 # ---------------------------------------------------------------------------
-# Decoder Layer  (4 norms: pre-attn, post-attn, pre-ffn, post-ffn)
+# Decoder layer
 # ---------------------------------------------------------------------------
 
 class Gemma3DecoderLayer(nn.Module):
+    """Single transformer block with pre- and post- layernorms (Gemma style)."""
 
     def __init__(
         self,
-        config,          # text_config namespace / dict-like
-        attention_type: str = "full_attention",
-        layer_id: Optional[int] = None,
+        config: Gemma3Config,
+        layer_id: int,
+        layer_type: str,
     ) -> None:
         super().__init__()
-
-        hidden_size = config.hidden_size
-        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
-        rope_local_base_freq = getattr(config, "rope_local_base_freq", 10000.0)
-        rope_theta = getattr(config, "rope_theta", 1000000.0)
-        max_position_embeddings = getattr(config, "max_position_embeddings", 131072)
-        sliding_window = getattr(config, "sliding_window", None)
-        query_pre_attn_scalar = getattr(config, "query_pre_attn_scalar", head_dim)
-
-        raw_rope_scaling = getattr(config, "rope_scaling", None)
-        rope_scaling = _make_rope_scaling(raw_rope_scaling)
+        self.hidden_size = config.hidden_size
+        self.layer_type = layer_type
 
         self.self_attn = Gemma3Attention(
-            hidden_size=hidden_size,
+            hidden_size=config.hidden_size,
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
-            head_dim=head_dim,
-            rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
-            rope_local_base_freq=rope_local_base_freq,
-            max_position_embeddings=max_position_embeddings,
-            query_pre_attn_scalar=query_pre_attn_scalar,
-            attention_type=attention_type,
-            sliding_window=sliding_window,
+            head_dim=config.head_dim,
+            query_pre_attn_scalar=config.query_pre_attn_scalar,
+            sliding_window=config.sliding_window,
+            attention_type=layer_type,
+            rope_theta=config.rope_theta,
+            rope_local_base_freq=config.rope_local_base_freq,
+            rope_scaling=config.rope_scaling,
+            max_position_embeddings=config.max_position_embeddings,
+            attention_bias=config.attention_bias,
             layer_id=layer_id,
         )
+
         self.mlp = Gemma3MLP(
-            hidden_size=hidden_size,
+            hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
+            hidden_act=config.hidden_act,
             layer_id=layer_id,
         )
 
-        eps = getattr(config, "rms_norm_eps", 1e-6)
-
-        # Gemma 3 has four RMSNorm instances per decoder layer
-        self.input_layernorm = RMSNorm(
-            hidden_size, eps=eps,
-            norm_name=OperationMetrics.INPUT_LAYERNORM, layer_id=layer_id,
+        # Four RMSNorm layers per block (Gemma 2/3 convention).
+        self.input_layernorm = Gemma3RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            norm_name=OperationMetrics.INPUT_LAYERNORM,
+            layer_id=layer_id,
         )
-        self.post_attention_layernorm = RMSNorm(
-            hidden_size, eps=eps,
-            norm_name=OperationMetrics.POST_ATTENTION_LAYERNORM, layer_id=layer_id,
+        self.post_attention_layernorm = Gemma3RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            norm_name=OperationMetrics.POST_ATTENTION_LAYERNORM,
+            layer_id=layer_id,
         )
-        self.pre_feedforward_layernorm = RMSNorm(hidden_size, eps=eps)
-        self.post_feedforward_layernorm = RMSNorm(hidden_size, eps=eps)
+        self.pre_feedforward_layernorm = Gemma3RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            layer_id=layer_id,
+        )
+        self.post_feedforward_layernorm = Gemma3RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            layer_id=layer_id,
+        )
 
     def forward(
         self,
@@ -315,14 +482,18 @@ class Gemma3DecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
     ) -> torch.Tensor:
-        # --- Self-Attention block ---
+        # ---------- Self-attention ----------
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        hidden_states = self.self_attn(positions, hidden_states, kv_cache)
+        hidden_states = self.self_attn(
+            positions=positions,
+            hidden_states=hidden_states,
+            kv_cache=kv_cache,
+        )
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = residual + hidden_states
 
-        # --- Feed-Forward block ---
+        # ---------- Feed-forward ----------
         residual = hidden_states
         hidden_states = self.pre_feedforward_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
@@ -333,54 +504,59 @@ class Gemma3DecoderLayer(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Full Model
+# Transformer backbone
 # ---------------------------------------------------------------------------
 
-class Gemma3TextModel(nn.Module):
-
-    def __init__(self, config) -> None:
+class Gemma3Model(nn.Module):
+    def __init__(self, hf_config) -> None:
         super().__init__()
-        self.config = config
+        self.config = Gemma3Config(hf_config)
+        self.vocab_size = self.config.vocab_size
 
-        # Token embeddings (first pipeline stage only)
+        # Embedding (first pipeline stage only).
         self.embed_tokens = None
         if is_pipeline_first_stage():
-            vocab_size = ((config.vocab_size + 63) // 64) * 64
+            vocab_size = ((self.config.vocab_size + 63) // 64) * 64
             self.embed_tokens = VocabParallelEmbedding(
                 vocab_size,
-                config.hidden_size,
+                self.config.hidden_size,
                 perform_initialization=False,
                 linear_metric_name=OperationMetrics.EMBED_LINEAR,
                 communication_metric_name=OperationMetrics.EMBED_ALL_REDUCE,
             )
+            # Gemma scales embeddings by sqrt(hidden_size).
+            # Compute in default dtype (bfloat16) to match HF behavior.
+            self.register_buffer(
+                "normalizer",
+                torch.tensor(self.config.hidden_size ** 0.5),
+                persistent=False,
+            )
 
-        # Per-layer attention types from text_config
-        layer_types: List[str] = getattr(
-            config, "layer_types",
-            ["full_attention"] * config.num_hidden_layers,
+        # Decoder layers (distributed across pipeline stages).
+        num_layers = (
+            self.config.num_hidden_layers
+            // get_pipeline_model_parallel_world_size()
         )
-
-        pp_size = get_pipeline_model_parallel_world_size()
-        pp_rank = get_pipeline_model_parallel_rank()
-        num_layers = config.num_hidden_layers // pp_size
-        layer_offset = pp_rank * num_layers
+        layer_offset = get_pipeline_model_parallel_rank() * num_layers
 
         self.layers = nn.ModuleList()
-        for local_id in range(num_layers):
-            global_id = local_id + layer_offset
-            attn_type = (
-                layer_types[global_id]
-                if global_id < len(layer_types)
-                else "full_attention"
-            )
+        for layer_id in range(num_layers):
+            global_layer_id = layer_id + layer_offset
+            layer_type = self.config.layer_types[global_layer_id]
             self.layers.append(
-                Gemma3DecoderLayer(config, attention_type=attn_type, layer_id=global_id)
+                Gemma3DecoderLayer(
+                    self.config,
+                    layer_id=global_layer_id,
+                    layer_type=layer_type,
+                )
             )
 
-        # Final norm (last pipeline stage only)
+        # Final norm (last pipeline stage only).
         self.norm = None
         if is_pipeline_last_stage():
-            self.norm = RMSNorm(config.hidden_size, eps=getattr(config, "rms_norm_eps", 1e-6))
+            self.norm = Gemma3RMSNorm(
+                self.config.hidden_size, eps=self.config.rms_norm_eps
+            )
 
     def forward(
         self,
@@ -388,51 +564,41 @@ class Gemma3TextModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[KVCache],
     ) -> torch.Tensor:
-        if self.embed_tokens is not None:
+        if self.embed_tokens:
             hidden_states = self.embed_tokens(hidden_states)
-            # Gemma uses embed_scale = sqrt(hidden_size)
-            hidden_states = hidden_states * (self.config.hidden_size ** 0.5)
+            hidden_states = hidden_states * self.normalizer
 
         for i, layer in enumerate(self.layers):
             hidden_states = layer(positions, hidden_states, kv_caches[i])
 
-        if self.norm is not None:
+        if self.norm:
             hidden_states = self.norm(hidden_states)
 
         return hidden_states
 
 
+# ---------------------------------------------------------------------------
+# CausalLM wrapper
+# ---------------------------------------------------------------------------
+
 class Gemma3ForCausalLM(nn.Module):
-    """Text-only Gemma 3 causal LM.
-
-    The HF checkpoint uses ``Gemma3ForConditionalGeneration`` as the
-    architecture name, but we expose a text-only model and ignore all
-    vision-encoder weights during loading.
-    """
-
-    _column_parallel_layers: List[str] = []
-    _row_parallel_layers: List[str] = ["o_proj", "down_proj"]
-
-    def __init__(self, config) -> None:
+    def __init__(self, hf_config) -> None:
         super().__init__()
-
-        # config may be the top-level Gemma3Config; unwrap text_config if needed.
-        text_cfg = getattr(config, "text_config", config)
-        # Attach dtype so weight_utils can use it when needed
-        if not hasattr(text_cfg, "dtype"):
-            text_cfg.dtype = getattr(config, "dtype", "bfloat16")
-
-        self.config = text_cfg
-        self.model = Gemma3TextModel(text_cfg)
+        self.config = hf_config
+        self.gemma3_config = Gemma3Config(hf_config)
+        self.model = Gemma3Model(hf_config)
 
         self.is_pipeline_first_stage = is_pipeline_first_stage()
         self.is_pipeline_last_stage = is_pipeline_last_stage()
 
+        vocab_size = ((self.gemma3_config.vocab_size + 63) // 64) * 64
+
+        # Gemma 3 ties lm_head with embed_tokens; we still allocate a
+        # separate parameter so the Sampler can reference it.
         self.lm_head = None
         if self.is_pipeline_last_stage:
-            vocab_size = ((text_cfg.vocab_size + 63) // 64) * 64
             self.lm_head = ColumnParallelLinear(
-                text_cfg.hidden_size,
+                self.gemma3_config.hidden_size,
                 vocab_size,
                 bias=False,
                 gather_output=False,
@@ -447,9 +613,8 @@ class Gemma3ForCausalLM(nn.Module):
     ) -> torch.Tensor:
         if not self.is_pipeline_first_stage:
             hidden_states = torch.empty(
-                (positions.shape[0], self.config.hidden_size),
-                dtype=self.config.dtype if isinstance(self.config.dtype, torch.dtype)
-                      else torch.bfloat16,
+                (positions.shape[0], self.gemma3_config.hidden_size),
+                dtype=torch.get_default_dtype(),
                 device=hidden_states.device,
             )
             hidden_states = recv(hidden_states)
@@ -461,9 +626,21 @@ class Gemma3ForCausalLM(nn.Module):
 
         return hidden_states
 
-    # ------------------------------------------------------------------
-    # Weight loading
-    # ------------------------------------------------------------------
+    # ----- Tensor-parallel weight categories -----
+    _column_parallel_layers = [
+        "q_proj", "k_proj", "v_proj", "gate_proj", "up_proj",
+    ]
+    _row_parallel_layers = ["o_proj", "down_proj"]
+
+    def _prepare_all_norms(self):
+        """Materialise effective_weight = weight + 1 for every Gemma3RMSNorm."""
+        for module in self.modules():
+            if isinstance(module, Gemma3RMSNorm):
+                module._prepare_weight()
+
+    # --------------------------------------------------------------------- #
+    #                         Weight loading                                 #
+    # --------------------------------------------------------------------- #
 
     def load_weights(
         self,
@@ -471,157 +648,152 @@ class Gemma3ForCausalLM(nn.Module):
         cache_dir: Optional[str] = None,
         load_format: str = "auto",
         revision: Optional[str] = None,
-    ) -> None:
+    ):
+        """Load weights from a HuggingFace Gemma-3 multimodal checkpoint.
+
+        The checkpoint stores text weights under ``language_model.model.layers.*``
+        and ``language_model.lm_head.*``.  We strip the ``language_model.``
+        prefix and skip all vision-related tensors.
+        """
+
+        weight_suffixes = ["weight"]
+
+        column_parallel_weights: List[str] = []
+        for layer in self._column_parallel_layers:
+            for suffix in weight_suffixes:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+        row_parallel_weights: List[str] = []
+        for layer in self._row_parallel_layers:
+            for suffix in weight_suffixes:
+                row_parallel_weights.append(f"{layer}.{suffix}")
+
         tp_size = get_tensor_model_parallel_world_size()
-        tp_rank = get_tensor_model_parallel_rank()
         pp_size = get_pipeline_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
         pp_rank = get_pipeline_model_parallel_rank()
 
-        cfg = self.config
-        assert cfg.num_hidden_layers % pp_size == 0
-        layers_per_stage = cfg.num_hidden_layers // pp_size
+        assert self.gemma3_config.num_hidden_layers % pp_size == 0
+        layers_per_stage = self.gemma3_config.num_hidden_layers // pp_size
         first_layer_id = layers_per_stage * pp_rank
         last_layer_id = layers_per_stage * (pp_rank + 1) - 1
 
-        head_dim = getattr(cfg, "head_dim", cfg.hidden_size // cfg.num_attention_heads)
-        q_proj_shard_size = (cfg.num_attention_heads // tp_size) * head_dim
-        kv_proj_shard_size = (cfg.num_key_value_heads // tp_size) * head_dim
-
-        # (checkpoint_suffix, shard_size, offset_into_fused_qkv)
-        attention_weight_specs = [
-            ("q_proj", q_proj_shard_size, 0),
-            ("k_proj", kv_proj_shard_size, q_proj_shard_size),
-            ("v_proj", kv_proj_shard_size, q_proj_shard_size + kv_proj_shard_size),
-        ]
-
-        column_parallel_weights: List[str] = []
-        row_parallel_weights: List[str] = []
-        for layer in self._column_parallel_layers:
-            column_parallel_weights.append(f"{layer}.weight")
-        for layer in self._row_parallel_layers:
-            row_parallel_weights.append(f"{layer}.weight")
-
         state_dict = self.state_dict()
+
+        loaded_count = 0
+        skipped_count = 0
 
         for name, loaded_weight in hf_model_weights_iterator(
             model_name_or_path, cache_dir, load_format, revision
         ):
-            # ---- Skip non-text weights ----
-            # Vision encoder lives under "model.vision_tower" or
-            # "multi_modal_projector" – drop everything that isn't
-            # in the text model.
-            if any(
-                pat in name
-                for pat in (
-                    "vision_tower",
-                    "multi_modal_projector",
-                    "vision_model",
-                    "visual",
-                )
-            ):
-                continue
-
-            if "rotary_emb.inv_freq" in name:
-                continue
-
-            # ---- Pipeline stage filtering ----
-            if pp_rank != 0 and "embed_tokens" in name:
-                continue
-            if pp_rank != pp_size - 1 and (
-                "lm_head" in name or name == "model.norm.weight"
-            ):
-                continue
-
-            # ---- Remap HF top-level Gemma3ForConditionalGeneration prefix ----
-            # HF stores text weights under "language_model.model.layers.*" or
-            # simply "model.layers.*" depending on the checkpoint version.
+            # ---- Strip multimodal prefix ----
+            # HF Gemma 3 checkpoints store text weights as
+            #   language_model.model.layers.X.…  and  language_model.lm_head.…
+            # We map them to our model.layers.X.…  /  lm_head.…
             if name.startswith("language_model."):
                 name = name[len("language_model."):]
 
-            # ---- Layer index extraction & pipeline filtering ----
-            if "model.layers." in name:
-                parts = name.split(".")
-                try:
-                    layer_idx = int(parts[2])
-                except (IndexError, ValueError):
-                    layer_idx = None
-
-                if layer_idx is not None:
-                    if layer_idx < first_layer_id or layer_idx > last_layer_id:
-                        continue
-                    new_layer_idx = layer_idx - first_layer_id
-                    parts[2] = str(new_layer_idx)
-                    name = ".".join(parts)
-
-            # ---- Fused QKV ----
-            is_attention_weight = False
-            for weight_name, shard_size, offset in attention_weight_specs:
-                if f"self_attn.{weight_name}" not in name:
-                    continue
-
-                qkv_name = name.replace(f"self_attn.{weight_name}", "self_attn.qkv_proj")
-                if qkv_name not in state_dict:
-                    break
-
-                param = state_dict[qkv_name]
-                loaded_weight = loaded_weight[
-                    shard_size * tp_rank : shard_size * (tp_rank + 1)
-                ]
-                param_slice = param.data[offset : offset + shard_size]
-                assert param_slice.shape == loaded_weight.shape, (
-                    f"QKV shape mismatch for {name}: "
-                    f"{param_slice.shape} vs {loaded_weight.shape}"
+            # ---- Skip vision / irrelevant weights ----
+            if any(
+                skip in name
+                for skip in (
+                    "vision_tower",
+                    "multi_modal_projector",
+                    "vision_model",
+                    "image_",
+                    "rotary_emb.inv_freq",
+                    "rotary_emb.cos_sin_cache",
                 )
-                param_slice.copy_(loaded_weight)
-                is_attention_weight = True
-                break
-            if is_attention_weight:
+            ):
+                skipped_count += 1
                 continue
 
-            # ---- Fused gate+up projection ----
-            is_gate_up_weight = False
-            for stride_id, weight_name in enumerate(["gate_proj", "up_proj"]):
-                if f"mlp.{weight_name}" not in name:
+            # ---- embed_tokens ----
+            if "embed_tokens" in name:
+                if pp_rank != 0:
+                    skipped_count += 1
                     continue
-
-                gate_up_name = name.replace(f"mlp.{weight_name}", "mlp.gate_up_proj")
-                if gate_up_name not in state_dict:
-                    break
-
-                param = state_dict[gate_up_name]
-                shard_size = param.shape[0] // 2
-                loaded_weight = loaded_weight[
-                    shard_size * tp_rank : shard_size * (tp_rank + 1)
-                ]
-                param_slice = param.data[
-                    shard_size * stride_id : shard_size * (stride_id + 1)
-                ]
-                assert param_slice.shape == loaded_weight.shape, (
-                    f"gate_up shape mismatch for {name}: "
-                    f"{param_slice.shape} vs {loaded_weight.shape}"
-                )
-                param_slice.copy_(loaded_weight)
-                is_gate_up_weight = True
-                break
-            if is_gate_up_weight:
-                continue
-
-            # ---- Remaining weights ----
-            if name not in state_dict:
-                continue
-
-            param = state_dict[name]
-
-            if "embed_tokens" in name or "lm_head" in name:
+                param = state_dict["model.embed_tokens.weight"]
                 load_padded_tensor_parallel_vocab(param, loaded_weight, tp_rank)
+                loaded_count += 1
+                # Gemma 3 ties lm_head with embed_tokens.
+                if self.is_pipeline_last_stage and pp_size == 1:
+                    lm_head_param = state_dict["lm_head.weight"]
+                    load_padded_tensor_parallel_vocab(
+                        lm_head_param, loaded_weight, tp_rank
+                    )
+                    loaded_count += 1
                 continue
 
-            load_tensor_parallel_weights(
-                param,
-                loaded_weight,
-                name,
-                column_parallel_weights,
-                row_parallel_weights,
-                tp_rank,
-            )
+            # ---- lm_head (skip – tied with embed_tokens) ----
+            if "lm_head" in name:
+                skipped_count += 1
+                continue
+
+            # ---- Final norm ----
+            if name == "model.norm.weight":
+                if pp_rank != pp_size - 1:
+                    skipped_count += 1
+                    continue
+                param = state_dict["model.norm.weight"]
+                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+                param.data.copy_(loaded_weight)
+                loaded_count += 1
+                continue
+
+            # ---- Transformer layers ----
+            if "model.layers" in name:
+                layer_id = int(name.split(".")[2])
+                if layer_id < first_layer_id or layer_id > last_layer_id:
+                    skipped_count += 1
+                    continue
+
+                new_layer_id = layer_id - first_layer_id
+                new_name = name.replace(
+                    f"model.layers.{layer_id}.",
+                    f"model.layers.{new_layer_id}.",
+                )
+
+                if new_name not in state_dict:
+                    print(
+                        f"[WARNING] {new_name} not found in state_dict "
+                        f"(original: {name})"
+                    )
+                    skipped_count += 1
+                    continue
+
+                param = state_dict[new_name]
+                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+
+                load_tensor_parallel_weights(
+                    param,
+                    loaded_weight,
+                    new_name,
+                    column_parallel_weights,
+                    row_parallel_weights,
+                    tp_rank,
+                )
+                loaded_count += 1
+                continue
+
+            # ---- Catch-all ----
+            if name in state_dict:
+                param = state_dict[name]
+                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+                param.data.copy_(loaded_weight)
+                loaded_count += 1
+            else:
+                print(f"[WARNING] Unhandled weight: {name}")
+                skipped_count += 1
+
+        # Materialise effective RMSNorm weights (weight + 1).
+        self._prepare_all_norms()
+
+        # Verify that no model parameter is still zero-initialized
+        # (which would mean the weight was never loaded).
+        num_model_params = len(state_dict)
+        print(
+            f"[Gemma3] Model has {num_model_params} parameters in state_dict. "
+            f"Loaded {loaded_count} weight tensors, "
+            f"skipped {skipped_count}."
+        )
 

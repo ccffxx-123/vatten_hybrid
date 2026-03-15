@@ -30,6 +30,7 @@ from sarathi.model_executor.parallel_utils.parallel_state import (
 from sarathi.utils.threading_utils import synchronized
 from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.worker.cache_engine import get_cache_mem_alloc_backend
+from sarathi.model_executor.attention import AttentionBackend
 
 logger = init_logger(__name__)
 
@@ -154,62 +155,70 @@ class BaseWorker:
 
     @torch.inference_mode()
     @synchronized
-    def init_cache_engine(self, cache_config: CacheConfig) -> None:
+    def init_cache_engine(self, cache_config: CacheConfig, model_config: ModelConfig) -> None:
         torch.cuda.set_device(self.device)
         self.cache_config = cache_config
 
-        if (not self.model_config.is_hybrid_model()) or "vattn" in self.model_config.attention_backend:
-            # 纯单类型模型：原有路径，不做任何改动
-            mem_alloc_backend = get_cache_mem_alloc_backend(
-                self.model_config.attention_backend
+        if model_config.is_hybrid_model() and AttentionBackend.is_vLLM_hybird(model_config.attention_backend):
+            # 混合模型路径
+            from sarathi.core.kv_cache_config_builder import build_kv_cache_config
+            from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
+            from sarathi.core.sequence_manager.hybrid_worker_sequence_manager import (
+                HybridWorkerSequenceManager,
             )
-            self.cache_engine = get_cache_engine(
-                self.model_config.attention_backend
-            )(
+
+            # cache_config.num_gpu_blocks 已由 profile_num_available_blocks 填好
+            kv_cache_config = build_kv_cache_config(
+                model_config=self.model_config,
+                cache_config=self.cache_config,
+                parallel_config=self.parallel_config,
+            )
+
+            self.cache_engine = HybridCacheEngine(
                 self.cache_config, self.model_config,
-                self.parallel_config, mem_alloc_backend,
+                self.parallel_config, kv_cache_config,
             )
-            self.gpu_cache = self.cache_engine.gpu_cache
-            self.seq_manager = WorkerSequenceManager(
-                self.cache_config, self.scheduler_config,
-                self.model_config, self.parallel_config,
+            # self.gpu_cache = self.cache_engine.gpu_cache
+            # 转换为模型 forward 能直接使用的平坦列表
+            self.gpu_cache = self.cache_engine.get_per_layer_cache(
+                self.model_config.get_num_layers(self.parallel_config)
+            )
+
+            # gpu_cache[layer_idx] = (k_cache, v_cache)         ← Attention 层
+            #                      = (conv_state, ssm_state)     ← Mamba 层
+            #                         = None                        ← padding 层
+            # print("111111111111111111111111111111111111111111111111111111111111111111111111111")
+            # for layer_cache in self.gpu_cache:
+            #     if layer_cache is not None:
+                    # k_cache, v_cache = layer_cache
+                    # kv_cache = layer_cache
+                    # print(f'layer_type = {self.model_config.get_layer_type_list(layer_idx)}')
+                    # print(f'k_cache.shape, v_cache.shape = {k_cache.shape}, {v_cache.shape}')
+
+            self.seq_manager = HybridWorkerSequenceManager(
+                cache_config=self.cache_config,
+                scheduler_config=self.scheduler_config,
+                model_config=self.model_config,
+                parallel_config=self.parallel_config,
+                kv_cache_config=kv_cache_config,
             )
             return
 
-        # 混合模型路径
-        from sarathi.core.kv_cache_config_builder import build_kv_cache_config
-        from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
-        from sarathi.core.sequence_manager.hybrid_worker_sequence_manager import (
-            HybridWorkerSequenceManager,
-        )
 
-        # cache_config.num_gpu_blocks 已由 profile_num_available_blocks 填好
-        kv_cache_config = build_kv_cache_config(
-            model_config=self.model_config,
-            cache_config=self.cache_config,
-            parallel_config=self.parallel_config,
+        # 纯单类型模型：原有路径，不做任何改动
+        mem_alloc_backend = get_cache_mem_alloc_backend(
+            self.model_config.attention_backend
         )
-
-        self.cache_engine = HybridCacheEngine(
+        self.cache_engine = get_cache_engine(
+            self.model_config.attention_backend
+        )(
             self.cache_config, self.model_config,
-            self.parallel_config, kv_cache_config,
+            self.parallel_config, mem_alloc_backend,
         )
-        # self.gpu_cache = self.cache_engine.gpu_cache
-        # 转换为模型 forward 能直接使用的平坦列表
-        self.gpu_cache = self.cache_engine.get_per_layer_cache(
-            self.model_config.get_num_layers(self.parallel_config)
-        )
-
-        # gpu_cache[layer_idx] = (k_cache, v_cache)         ← Attention 层
-        #                      = (conv_state, ssm_state)     ← Mamba 层
-        #                         = None                        ← padding 层
-
-        self.seq_manager = HybridWorkerSequenceManager(
-            cache_config=self.cache_config,
-            scheduler_config=self.scheduler_config,
-            model_config=self.model_config,
-            parallel_config=self.parallel_config,
-            kv_cache_config=kv_cache_config,
+        self.gpu_cache = self.cache_engine.gpu_cache
+        self.seq_manager = WorkerSequenceManager(
+            self.cache_config, self.scheduler_config,
+            self.model_config, self.parallel_config,
         )
 
 
@@ -248,6 +257,7 @@ class BaseWorker:
 
         self.cache_engine.step(seq_metadata_list)
 
+        # print(self.gpu_cache[0][0].shape)
         sampler_outputs = self.model_runner.run(
             seq_metadata_list,
             self.gpu_cache,

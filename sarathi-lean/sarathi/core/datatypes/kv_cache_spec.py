@@ -135,7 +135,9 @@ class MambaSpec(KVCacheSpec):
             )
             
         # 假设 Mamba 的 block 同样是存储 block_size 个 token 的状态
-        result = single_token_state_bytes * self.block_size
+        # result = single_token_state_bytes * self.block_size
+        result = single_token_state_bytes
+
         log_lines.append(f"  结果: {result} bytes = {result/1024:.2f} KB")
         
         kv_logger.layout("\n".join(log_lines))

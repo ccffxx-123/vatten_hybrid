@@ -169,7 +169,7 @@ inline u64 get_num_overcommitted_kvblocks()
 {
     u64 overcommitted_kvblocks = 0;
     for (int reqId = 0; reqId < max_batch_size; reqId++)
-        overcommitted_kvblocks += mapped_pages[reqId] - tokens_to_pages(get_req_seq_length(reqId));
+        overcommitted_kvblocks += mapped_pages[reqId] > tokens_to_pages(get_req_seq_length(reqId)) ? mapped_pages[reqId] - tokens_to_pages(get_req_seq_length(reqId)) : 0;
     return overcommitted_kvblocks;
 }
 

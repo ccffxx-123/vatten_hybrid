@@ -7,6 +7,7 @@ from sarathi.model_executor.models.yi import YiForCausalLM
 # from sarathi.model_executor.models.Jamba import JambaForCausalLM
 from sarathi.model_executor.models.gemma3 import Gemma3ForCausalLM
 from sarathi.model_executor.models.gemma2 import Gemma2ForCausalLM
+from sarathi.model_executor.models.nemotron_h import NemotronHForCausalLM
 
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "Gemma3ForCausalLM",
     "Gemma2ForCausalLM",
     # "JambaForCausalLM",
+    'NemotronHForCausalLM',
 ]

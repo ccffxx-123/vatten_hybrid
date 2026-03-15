@@ -11,18 +11,20 @@ KB = 1024
 MB = 1024 * KB
 
 prompts = [
-    "Hello, my name is",
-    "The president of the United States is",
-    "The capital of France is",
-    "one add one is",
-    "who are you?"
+    # "Hello, my name is",
+    # "The president of the United States is",
+    # "The capital of France is",
+    # "1 + 1 = ",
+    "who are you?",
 ]
 
 
-# 生成带时间戳的输出目录路径
+# # 生成带时间戳的输出目录路径
 output_dir = f"{BASE_OUTPUT_DIR}/{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
-sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=100)
+sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=30)
+
+
 
 # --- 初始化 LLM 引擎 ---
 # 这是最耗时的一步，会启动 Ray 集群，加载模型权重到 GPU，并进行显存 Profiling。
@@ -38,12 +40,14 @@ llm_engine = LLMEngine.from_engine_args(
     # model="mistralai/Ministral-8B-Instruct-2410",   # 窗口，1024 * 32(32768) 3:1(32)
     # model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
     # model="google/gemma-3-4b-it",       # 窗口1024  29:5 
-    # model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
+    model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
+    # quantization="fp8",
+    dtype="bfloat16",  # <--- 明确指定使用 bfloat16 (或者写 "auto")
 
     # SSM-Transformer
     # model="ai21labs/AI21-Jamba-Mini-1.6",  # 28:4, 76，0
     # model="ibm-ai-platform/Bamba-9B-v2",     # 29:3  20, 0
-    model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
+    # model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
 
     # SSM-Transformer-swa
     # model="microsoft/Phi-4-mini-flash-reasoning",  # full + SWA（嵌入Mamba（all 10 MB）） (Samba，适合)
@@ -54,7 +58,7 @@ llm_engine = LLMEngine.from_engine_args(
 
     
     
-    tensor_parallel_size=2,
+    tensor_parallel_size=1,
     pipeline_parallel_size=1, # 不使用流水线并行
     
     # 允许执行模型仓库里的远程代码 (某些非标准模型需要)
@@ -65,7 +69,7 @@ llm_engine = LLMEngine.from_engine_args(
     
     # --- 调度器配置 ---
     scheduler_type="vllm",
-    chunk_size=100,   # 只有 Sarathi 模式有效
+    # chunk_size=100,   # 只有 Sarathi 模式有效
     # max_num_seqs=4: 一个 Batch 中最多同时处理 4 个请求。
     max_num_seqs=16,
     # --- 监控与调试 ---
@@ -74,23 +78,21 @@ llm_engine = LLMEngine.from_engine_args(
     enable_chrome_trace=True, # 开启 Chrome Trace，生成性能分析图 (json文件)
     
     # --- Attention 后端 ---
-    # attention_backend="fa_vattn",
-    attention_backend="fa_paged",
+    # attention_backend="fi_vattn",
     # attention_backend="fi_paged",
+    attention_backend="fi_paged_hybird",
     gpu_memory_utilization=0.9,
 
-    # replica_resource_mapping=replica_resource_mapping,
 
     # block_size=2 * MB, # KV Cache 块大小
-    block_size=256, # KV Cache 块大小
-    # block_size=16, # KV Cache 块大小
+    block_size=16, # KV Cache 块大小
 
     # max_num_batched_tokens=self._config.vllm_scheduler_max_tokens_in_batch,
     enable_op_level_metrics=False,
 
     load_format="dummy",
-    # replica_resource_mapping=[("", 3)],  # 改这里，0→2
-    replica_resource_mapping=[("", 2), ("", 3)],  # 用 GPU 2 和 GPU 3
+    # replica_resource_mapping=[("", 0)],  # 改这里，0→2
+    replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
 )
 
 

@@ -25,6 +25,7 @@ from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.model_executor.attention import AttentionBackend
 from sarathi.model_executor.attention import get_mamba_wrapper
 from sarathi.model_executor.attention import AttentionBackend
+from sarathi.core.datatypes.mamba_metadata import MambaInputMetadata
 logger = init_logger(__name__)
 
 USE_UVM = False
@@ -53,8 +54,11 @@ class ModelRunner:
             cache_config.block_size,
             self.device,
         )
+        self.has_mamba_layers = (
+            any(t == "state" for t in model_config.get_layer_type_list())
+        )
 
-        if model_config.is_hybrid_model():
+        if self.has_mamba_layers:
             # 确定 Mamba group 在 block_tables 中的下标
             # build_kv_cache_config 按 trans → swa → state 顺序排列 group
             layer_types = model_config.get_layer_type_list()
@@ -182,28 +186,63 @@ class ModelRunner:
             seq_metadata_list.append(seq_metadata)
 
         input_tokens, input_positions = self._prepare_inputs(seq_metadata_list)
+
         get_attention_wrapper().begin_forward(seq_metadata_list)
+
+        # -------------------- 新增：Mamba Profiling 元数据构造 --------------------
+        input_metadata = None
+        if self.has_mamba_layers:
+            get_mamba_wrapper().begin_forward(seq_metadata_list)
+            
+            # Profiling 阶段没有 block_tables，Wrapper 内部会提前 return
+            # 我们必须手动伪造一份元数据，强迫 Mamba 层跑一遍 Chunk Scan，精准捕获激活显存
+            seq_is_prefill = [True] * len(seq_metadata_list)
+            seq_lens = [seq_meta.prompt_chunk_len for seq_meta in seq_metadata_list]
+            seq_state_block_ids = [0] * len(seq_metadata_list)  # block_id=0 代表空槽，避免读写 Cache
+            
+            seq_token_offsets = []
+            offset = 0
+            for length in seq_lens:
+                seq_token_offsets.append(offset)
+                offset += length
+                
+            input_metadata = MambaInputMetadata(
+                seq_is_prefill=seq_is_prefill,
+                seq_lens=seq_lens,
+                seq_state_block_ids=seq_state_block_ids,
+                seq_token_offsets=seq_token_offsets,
+            )
+        # -----------------------------------------------------------------------
 
         if AttentionBackend.is_vATTN(self.model_config.attention_backend):
             get_attention_wrapper().is_profiling_iteration = True
         # Execute the model.
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        self.model(
-            hidden_states=input_tokens,
-            positions=input_positions,
-            kv_caches=[None] * num_layers,
-        )
+        if self.has_mamba_layers:
+            self.model(
+                hidden_states=input_tokens,
+                positions=input_positions,
+                kv_caches=[None] * num_layers,
+                input_metadata=input_metadata, # <--- 补上组装好的虚拟参数
+            )
+        else:
+            self.model(
+                hidden_states=input_tokens,
+                positions=input_positions,
+                kv_caches=[None] * num_layers,
+            )
 
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
         torch.cuda.synchronize()
         peak_memory = torch.cuda.max_memory_allocated()
         total_gpu_memory = get_gpu_memory()
+        # print("11111111111111111111111111111111111111111111111111111111111111111111111")
         # print(f"peak_memory: {peak_memory}, total_gpu_memory: {total_gpu_memory}")
         physical_memory = int(total_gpu_memory * gpu_memory_utilization - peak_memory)
 
 
-        if self.model_config.is_hybrid_model() and AttentionBackend.is_vLLM(self.model_config.attention_backend):
+        if self.model_config.is_hybrid_model() and AttentionBackend.is_vLLM_hybird(self.model_config.attention_backend):
             from sarathi.core.kv_cache_config_builder import build_kv_cache_config
             from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
             # num_blocks=1 仅用于计算单 block 字节数
@@ -217,10 +256,14 @@ class ModelRunner:
                 block_size, self.model_config, self.parallel_config
             )
 
+        logger.info(f"# cache_block_size: {cache_block_size}, physical_memory: {physical_memory}")
         num_gpu_blocks = int(physical_memory // cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         torch.cuda.empty_cache()
         get_attention_wrapper().end_forward()
+        # 新增：清理 Mamba 状态
+        if self.has_mamba_layers:
+            get_mamba_wrapper().end_forward()
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, physical_memory
 
@@ -253,18 +296,38 @@ class ModelRunner:
 
         get_attention_wrapper().begin_forward(seq_metadata_list)
 
-        if self.model_config.is_hybrid_model():
-            get_mamba_wrapper().begin_forward(seq_metadata_list)
-        
+        input_metadata = None
+        if self.has_mamba_layers:
+            # get_mamba_wrapper().begin_forward(seq_metadata_list)
+            mamba_wrapper = get_mamba_wrapper()
+            mamba_wrapper.begin_forward(seq_metadata_list)
             
+            # --- 传入每条序列的完整元数据 ---
+            input_metadata = MambaInputMetadata(
+                seq_is_prefill=mamba_wrapper.seq_is_prefill,
+                seq_lens=mamba_wrapper.seq_lens,
+                seq_state_block_ids=mamba_wrapper.seq_state_block_ids,
+                seq_token_offsets=mamba_wrapper.seq_token_offsets,
+            )
+            # print("99999999999999999999999999999999999999999999999999999")
+            # print(input_metadata.seq_is_prefill)
+
         with self._model_execution_e2e_timer:
             # Execute the model.
             try:
-                output = self.model(
-                    hidden_states=input_tokens,
-                    positions=input_positions,
-                    kv_caches=gpu_cache,
-                )
+                if self.has_mamba_layers:
+                    output = self.model(
+                        hidden_states=input_tokens,
+                        positions=input_positions,
+                        kv_caches=gpu_cache,
+                        input_metadata=input_metadata,  # 3. 将元数据透传给模型底层
+                    )
+                else:
+                    output = self.model(
+                        hidden_states=input_tokens,
+                        positions=input_positions,
+                        kv_caches=gpu_cache,
+                    )
             except RuntimeError as e:
                 logger.error(
                     f"RuntimeError: {e} for seq_metadata_list: {seq_metadata_list}"
@@ -277,7 +340,7 @@ class ModelRunner:
 
         get_attention_wrapper().end_forward()
 
-        if self.model_config.is_hybrid_model():
+        if self.has_mamba_layers:
             get_mamba_wrapper().end_forward()
 
         return output

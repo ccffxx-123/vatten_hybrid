@@ -78,7 +78,9 @@ from sarathi.core.kv_cache_logger import kv_logger
 logger = init_logger(__name__)
 
 # 张量类型别名
-AttentionCache = Tuple[torch.Tensor, torch.Tensor]   # (k_cache, v_cache)
+# AttentionCache = Tuple[torch.Tensor, torch.Tensor]   # (k_cache, v_cache)
+AttentionCache = torch.Tensor  # 组合张量: shape [num_blocks, 2, block_size, num_heads, head_dim]
+
 MambaCache = List[torch.Tensor]                       # [state_0, state_1, ...]
 LayerCache = Union[AttentionCache, MambaCache]
 # gpu_cache 的完整类型：[group_idx][buf_idx] → LayerCache
@@ -192,44 +194,43 @@ class HybridCacheEngine:
 
     def _reshape_attention_from_raw(
         self,
-        raw_buf: torch.Tensor,                           # int8，size = num_blocks * padded_page_size_bytes
+        raw_buf: torch.Tensor,                                   # int8，size = num_blocks * padded_page_size_bytes
         spec: Union[FullAttentionSpec, SlidingWindowSpec],
         padded_page_size_bytes: int,
     ) -> AttentionCache:
         """
-        从 raw int8 buffer 创建 Attention 的 (k_cache, v_cache) as_strided 视图。
+        从 raw int8 buffer 创建 Attention 的联合 (KV) as_strided 视图。
 
         布局（每个 block slot = padded_page_size_bytes 字节）：
-          [K_data (block_size×num_kv_heads×head_size×dtype_size bytes) |
-           V_data (同上) |
-           padding (padded_page_size - attn_page_size bytes，仅混合模型存在)]
+          [K_data | V_data | padding]
 
-        stride[0] = padded_page_size_bytes // dtype_size
-        这保证 Attention 和 Mamba group 的 block_id 映射到相同的物理偏移。
+        我们将其映射为单个 contiguous 张量，维度为：
+        (num_blocks, 2, block_size, num_kv_heads, head_size)
+        其中 2 代表 K 和 V。
         """
         num_blocks = raw_buf.numel() // padded_page_size_bytes
         dt_size = _dtype_size(spec.dtype)
+        
         # block 间距（以 spec.dtype 元素数计）
         block_stride = padded_page_size_bytes // dt_size
-        # 每个 block slot 内 K/V 各自的元素数
+        
+        # 单个 K 或 V 在 block slot 内的元素数
         kv_inner_elems = spec.block_size * spec.num_kv_heads * spec.head_size
         inner_strides = _c_contiguous_strides(
             (spec.block_size, spec.num_kv_heads, spec.head_size)
         )
         typed = raw_buf.view(spec.dtype)
-        k_cache = torch.as_strided(
+
+        # 核心修改：直接创建一个联合了 K 和 V 的单个张量
+        # 维度 1 的大小为 2 (K 和 V)，其 stride 正好是 kv_inner_elems
+        kv_cache = torch.as_strided(
             typed,
-            size=(num_blocks, spec.block_size, spec.num_kv_heads, spec.head_size),
-            stride=(block_stride, *inner_strides),
+            size=(num_blocks, 2, spec.block_size, spec.num_kv_heads, spec.head_size),
+            stride=(block_stride, kv_inner_elems, *inner_strides),
             storage_offset=0,
         )
-        v_cache = torch.as_strided(
-            typed,
-            size=(num_blocks, spec.block_size, spec.num_kv_heads, spec.head_size),
-            stride=(block_stride, *inner_strides),
-            storage_offset=kv_inner_elems,  # V 紧接 K 之后（在同一 block slot 内）
-        )
-        return (k_cache, v_cache)
+        
+        return kv_cache
 
     def _reshape_mamba_from_raw(
         self,
@@ -417,19 +418,26 @@ class HybridCacheEngine:
                 group_cache.append(view)
                 
                 layer_name = group.layer_names[buf_idx]
+                # if isinstance(spec, (FullAttentionSpec, SlidingWindowSpec)):
+                #     k_cache, v_cache = view
+                #     view_log.append(f"    buffer[{buf_idx}] → 层'{layer_name}':")
+                #     view_log.append(f"      k_cache: shape={tuple(k_cache.shape)}, "
+                #                     f"dtype={k_cache.dtype}, stride={k_cache.stride()}")
+                #     view_log.append(f"      v_cache: shape={tuple(v_cache.shape)}, "
+                #                     f"dtype={v_cache.dtype}, stride={v_cache.stride()}")
+                #     view_log.append(f"      k[block_id=0] 物理偏移: 0 bytes")
+                    
+                #     # 提前算出偏移量，避免 f-string 内写太长导致可读性差
+                #     v_offset = (spec.block_size * spec.num_kv_heads * spec.head_size * _dtype_size(spec.dtype))
+                #     view_log.append(f"      v[block_id=0] 物理偏移: {v_offset} bytes")
+                
                 if isinstance(spec, (FullAttentionSpec, SlidingWindowSpec)):
-                    k_cache, v_cache = view
+                    kv_cache = view  # 现在 view 是一个完整的连续张量
                     view_log.append(f"    buffer[{buf_idx}] → 层'{layer_name}':")
-                    view_log.append(f"      k_cache: shape={tuple(k_cache.shape)}, "
-                                    f"dtype={k_cache.dtype}, stride={k_cache.stride()}")
-                    view_log.append(f"      v_cache: shape={tuple(v_cache.shape)}, "
-                                    f"dtype={v_cache.dtype}, stride={v_cache.stride()}")
-                    view_log.append(f"      k[block_id=0] 物理偏移: 0 bytes")
-                    
-                    # 提前算出偏移量，避免 f-string 内写太长导致可读性差
-                    v_offset = (spec.block_size * spec.num_kv_heads * spec.head_size * _dtype_size(spec.dtype))
-                    view_log.append(f"      v[block_id=0] 物理偏移: {v_offset} bytes")
-                    
+                    view_log.append(f"      kv_cache: shape={tuple(kv_cache.shape)}, "
+                                    f"dtype={kv_cache.dtype}, stride={kv_cache.stride()}")
+                    view_log.append(f"      联合 kv_cache 物理连续，起始偏移: 0 bytes")
+
                 elif isinstance(spec, MambaSpec):
                     view_log.append(f"    buffer[{buf_idx}] → 层'{layer_name}':")
                     for s_idx, state in enumerate(view):
@@ -575,6 +583,7 @@ class HybridCacheEngine:
         # 对于纯 Attention 模型：= 实际 page_size，无 padding overhead
         # 对于 Attention+Mamba 模型：= Attention page_size（较大），Mamba 有填充字节
         padded_page_size = max(g.kv_cache_spec.page_size_bytes for g in groups)
+        print(f"# group_size: {group_size}, padded_page_size: {padded_page_size}")
         return group_size * padded_page_size
 
 

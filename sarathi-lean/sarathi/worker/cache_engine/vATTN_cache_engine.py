@@ -49,7 +49,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         return vattention.num_free_kvblocks()
 
     def allocate_gpu_cache(self) -> List[torch.Tensor]:
-        vattention.set_verbose(True)
+        # vattention.set_verbose(True)
         kv_cache = vattention.init_kvcache(
                                     self.num_layers,
                                     self.num_heads,
@@ -197,7 +197,7 @@ class vATTNCacheEngine(BaseCacheEngine):
         vattention.cleanup()
 
     def show_allocator_state(self):
-        vattention.set_verbose(True)
+        # vattention.set_verbose(True)
         vattention.show_allocator_state()
 
 

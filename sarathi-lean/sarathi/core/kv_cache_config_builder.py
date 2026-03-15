@@ -115,27 +115,70 @@ def _make_sliding_window_spec(
     )
 
 
+# def _make_mamba_spec(
+#     model_config: ModelConfig,
+#     cache_config: CacheConfig,
+# ) -> MambaSpec:
+#     """
+#     构建 Mamba 层的 KVCacheSpec。
+
+#     每个 block 存储两个状态张量（conv_state + ssm_state）：
+#       conv_state : shape (d_model, d_conv-1)              — 一维卷积的历史输入
+#       ssm_state  : shape (num_heads, head_dim, d_state)   — 递归状态矩阵
+
+#     对应 PDF Case 4 的说明：
+#       vLLM 通过填充（增大 Attention 的 block_size）让 Mamba 和 Attention 的
+#       page_size 相等，然后共享同一张物理张量（KVCacheTensor）。
+#       本实现每层独立分配张量，不需要 page_size 对齐，Mamba 按实际状态大小计算。
+
+#     字段映射（hf_config 中常见的 key）：
+#       d_model     = hf_config.mamba_d_model 或 hidden_size
+#       d_state     = model_config.get_d_state()   (ssm_state_size / d_state 等)
+#       d_conv      = hf_config.mamba_d_conv       (通常为 4)
+#       num_heads   = hf_config.mamba_num_heads 或 num_attention_heads
+#     """
+#     hf = model_config.hf_config
+#     d_state = model_config.get_d_state()
+#     assert d_state > 0, (
+#         "检测到 'state' 层但 model_config.get_d_state() 返回 0，"
+#         "请检查 hf_config 中的 ssm_state_size / state_size / d_state 字段，"
+#         "或通过 ModelConfig(override_d_state=...) 手动指定。"
+#     )
+
+#     # d_model：Mamba 的内部宽度（通常等于 hidden_size）
+#     d_model: int = getattr(hf, "mamba_d_model", None) or hf.hidden_size
+
+#     # d_conv：conv_state 保存 d_conv-1 个历史 token 的激活
+#     d_conv: int = int(
+#         getattr(hf, "mamba_d_conv", None)
+#         or getattr(hf, "d_conv", 4)
+#     )
+
+#     # Mamba 多头划分（Mamba-2 风格）
+#     mamba_num_heads: int = int(
+#         getattr(hf, "mamba_num_heads", None)
+#         or getattr(hf, "num_attention_heads", 1)
+#     )
+#     head_dim: int = d_model // mamba_num_heads
+
+#     return MambaSpec(
+#         block_size=cache_config.block_size,
+#         shapes=(
+#             (d_model, d_conv - 1),               # conv_state
+#             (mamba_num_heads, head_dim, d_state), # ssm_state
+#         ),
+#         # dtypes=(torch.float32, torch.float32),
+#         dtypes=(model_config.dtype, model_config.dtype),
+#     )
+
+
 def _make_mamba_spec(
     model_config: ModelConfig,
     cache_config: CacheConfig,
 ) -> MambaSpec:
     """
     构建 Mamba 层的 KVCacheSpec。
-
-    每个 block 存储两个状态张量（conv_state + ssm_state）：
-      conv_state : shape (d_model, d_conv-1)              — 一维卷积的历史输入
-      ssm_state  : shape (num_heads, head_dim, d_state)   — 递归状态矩阵
-
-    对应 PDF Case 4 的说明：
-      vLLM 通过填充（增大 Attention 的 block_size）让 Mamba 和 Attention 的
-      page_size 相等，然后共享同一张物理张量（KVCacheTensor）。
-      本实现每层独立分配张量，不需要 page_size 对齐，Mamba 按实际状态大小计算。
-
-    字段映射（hf_config 中常见的 key）：
-      d_model     = hf_config.mamba_d_model 或 hidden_size
-      d_state     = model_config.get_d_state()   (ssm_state_size / d_state 等)
-      d_conv      = hf_config.mamba_d_conv       (通常为 4)
-      num_heads   = hf_config.mamba_num_heads 或 num_attention_heads
+    支持自动识别 Mamba-1 和 Mamba-2 (如 Nemotron-H) 架构的异构张量形状。
     """
     hf = model_config.hf_config
     d_state = model_config.get_d_state()
@@ -145,29 +188,44 @@ def _make_mamba_spec(
         "或通过 ModelConfig(override_d_state=...) 手动指定。"
     )
 
-    # d_model：Mamba 的内部宽度（通常等于 hidden_size）
-    d_model: int = getattr(hf, "mamba_d_model", None) or hf.hidden_size
-
-    # d_conv：conv_state 保存 d_conv-1 个历史 token 的激活
     d_conv: int = int(
         getattr(hf, "mamba_d_conv", None)
         or getattr(hf, "d_conv", 4)
     )
 
-    # Mamba 多头划分（Mamba-2 风格）
-    mamba_num_heads: int = int(
-        getattr(hf, "mamba_num_heads", None)
-        or getattr(hf, "num_attention_heads", 1)
-    )
-    head_dim: int = d_model // mamba_num_heads
+    # 核心修复：动态识别 Mamba-2 架构
+    if hasattr(hf, "mamba_head_dim"):
+        # ==========================================
+        # Mamba-2 / Nemotron-H 路线
+        # ==========================================
+        mamba_num_heads = hf.mamba_num_heads
+        head_dim = hf.mamba_head_dim
+        n_groups = getattr(hf, "n_groups", 1)  # Nemotron-H 中通常为 8
+
+        # 还原 Mamba-2 的真实内部维度映射
+        intermediate_size = mamba_num_heads * head_dim
+        conv_dim = intermediate_size + 2 * n_groups * d_state
+
+        conv_shape = (conv_dim, d_conv - 1)                 # -> (10240, 3)
+        ssm_shape = (mamba_num_heads, head_dim, d_state)    # -> (128, 64, 128)
+    else:
+        # ==========================================
+        # Mamba-1 经典路线
+        # ==========================================
+        d_model: int = getattr(hf, "mamba_d_model", None) or hf.hidden_size
+        mamba_num_heads: int = int(
+            getattr(hf, "mamba_num_heads", None)
+            or getattr(hf, "num_attention_heads", 1)
+        )
+        head_dim: int = d_model // mamba_num_heads
+
+        conv_shape = (d_model, d_conv - 1)                  # -> (4096, 3)
+        ssm_shape = (mamba_num_heads, head_dim, d_state)
 
     return MambaSpec(
         block_size=cache_config.block_size,
-        shapes=(
-            (d_model, d_conv - 1),               # conv_state
-            (mamba_num_heads, head_dim, d_state), # ssm_state
-        ),
-        dtypes=(torch.float32, torch.float32),
+        shapes=(conv_shape, ssm_shape),
+        dtypes=(model_config.dtype, model_config.dtype),
     )
 
 
@@ -254,6 +312,10 @@ def _split_layers_into_groups(
 
 # kv_cache_config_builder.py
 
+def _dtype_size(dtype: torch.dtype) -> int:
+    """Returns the size in bytes of the given PyTorch data type."""
+    return torch.tensor([], dtype=dtype).element_size()
+
 def _compute_adjusted_block_size(
     model_config: ModelConfig,
     cache_config: CacheConfig,
@@ -307,6 +369,7 @@ def _compute_adjusted_block_size(
             f"（对应 vLLM 文档 Case 4）"
         )
         block_size = min_block_size
+
 
     return block_size
 

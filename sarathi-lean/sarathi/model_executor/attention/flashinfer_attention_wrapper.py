@@ -48,6 +48,8 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
     def begin_forward(
         self,
         seq_metadata_list: List[SequenceMetadata],
+        # attention_type: str = "full_attention",        # ← add
+        # sliding_window: Optional[int] = None,          # ← add
     ) -> None:
         # The indptr tensor captures the location query tokens in the input tensor.
         # |<---------------------- num_valid_tokens ----------------------------------------------------->|
@@ -95,6 +97,10 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
             num_blocks_in_use = (
                 current_total_len + self.block_size - 1
             ) // self.block_size
+            # if seq_metadata.block_tables is not None:
+            #     for i in range(len(seq_metadata.block_tables)):
+            #         kv_page_indices.extend(seq_metadata.block_tables[i][:num_blocks_in_use])
+            # else:
             kv_page_indices.extend(seq_metadata.block_table[:num_blocks_in_use])
             kv_page_indptr.append(kv_page_indptr[-1] + num_blocks_in_use)
             kv_last_page_len.append(
@@ -113,6 +119,10 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
             # indptr for the prompt tokens in q/o tensor
             qo_indptr.append(qo_indptr[-1] + 1)
             # Compute the kv page indices for the prompt tokens.
+            # if seq_metadata.block_tables is not None:
+            #     for i in range(len(seq_metadata.block_tables)):
+            #         kv_page_indices.extend(seq_metadata.block_tables[i])
+            # else:
             kv_page_indices.extend(seq_metadata.block_table)
             kv_page_indptr.append(kv_page_indptr[-1] + len(seq_metadata.block_table))
             kv_last_page_len.append(context_len % self.block_size or self.block_size)
@@ -145,52 +155,6 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
         self._wrapper.end_forward()
         self.is_metadata_initialized = False
 
-    # def forward(
-    #     self,
-    #     query: torch.Tensor,
-    #     key: torch.Tensor,
-    #     value: torch.Tensor,
-    #     kv_cache: torch.Tensor,
-    #     softmax_scale: float = 1.0,
-    #     layer_id: Optional[int] = None,
-    # ) -> torch.Tensor:
-    #     assert self.is_metadata_initialized, "Metadata is not initialized."
-
-    #     if self.is_profiling_iteration:
-    #         # there is no need to call attention in profiling mode
-    #         return torch.zeros_like(query)
-
-    #     with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
-    #         query = query.contiguous().reshape(-1, self.num_q_heads, self.head_dim)
-    #         key = key.contiguous().reshape(-1, self.num_kv_heads, self.head_dim)
-    #         value = value.contiguous().reshape(-1, self.num_kv_heads, self.head_dim)
-
-    #     with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
-    #         append_paged_kv_cache(
-    #             key,
-    #             value,
-    #             self.qo_indptr,
-    #             kv_cache,
-    #             self.kv_page_indices,
-    #             self.kv_page_indptr,
-    #             self.kv_last_page_len,
-    #             kv_layout="NHD",
-    #         )
-
-    #     with self.get_timer(OperationMetrics.ATTN, layer_id):
-    #         output = self._wrapper.forward(
-    #             query,
-    #             kv_cache,
-    #             pos_encoding_mode="NONE",
-    #             sm_scale=softmax_scale,
-    #         )
-
-    #     with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
-    #         output = output.reshape(-1, self.num_q_heads * self.head_dim)
-
-    #     return output
-
-
     def forward(
         self,
         query: torch.Tensor,
@@ -204,27 +168,29 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
     ) -> torch.Tensor:
         assert self.is_metadata_initialized, "Metadata is not initialized."
 
-        if self.is_profiling_iteration:
-            return torch.zeros_like(query)
-
-        # window_left=-1 means full attention; a positive value caps the
-        # left context to that many tokens (FlashInfer's sliding-window API).
         window_left = (
             sliding_window
             if attention_type == "sliding_attention" and sliding_window is not None
             else -1
         )
 
+        if self.is_profiling_iteration:
+            # there is no need to call attention in profiling mode
+            return torch.zeros_like(query)
+
         with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
             query = query.contiguous().reshape(-1, self.num_q_heads, self.head_dim)
-            key   = key.contiguous().reshape(-1, self.num_kv_heads, self.head_dim)
+            key = key.contiguous().reshape(-1, self.num_kv_heads, self.head_dim)
             value = value.contiguous().reshape(-1, self.num_kv_heads, self.head_dim)
 
         with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
             append_paged_kv_cache(
-                key, value,
-                self.qo_indptr, kv_cache,
-                self.kv_page_indices, self.kv_page_indptr,
+                key,
+                value,
+                self.qo_indptr,
+                kv_cache,
+                self.kv_page_indices,
+                self.kv_page_indptr,
                 self.kv_last_page_len,
                 kv_layout="NHD",
             )
@@ -235,10 +201,11 @@ class FlashInferAttentionWrapper(BaseAttentionWrapper):
                 kv_cache,
                 pos_encoding_mode="NONE",
                 sm_scale=softmax_scale,
-                window_left=window_left,               # ← add
+                window_left=window_left, # <--- 把它加在这里
             )
 
         with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
             output = output.reshape(-1, self.num_q_heads * self.head_dim)
 
         return output
+

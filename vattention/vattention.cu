@@ -69,7 +69,7 @@ public:
     {
         std::stringstream ss;
         u64 nr_pages_in_pool = cuda_pages.size();
-        u64 total_free_kvblocks = get_num_free_kvblocks() * 2; 
+        u64 total_free_kvblocks = get_num_free_kvblocks(); 
 
         log.log("==================== vHybrid Allocator State ====================");
         log.log("Global Physical Memory Pool:");
@@ -84,8 +84,8 @@ public:
             ss.str(std::string());
             ss << std::setw(8) << i << ": "
                << std::setw(8) << get_req_seq_length(i) << " : "
-               << std::setw(8) << mapped_pages[i] * 2 << " : "
-               << std::setw(8) << tokens_to_pages(get_req_seq_length(i)) * 2;
+               << std::setw(8) << mapped_pages[i]<< " : "
+               << std::setw(8) << tokens_to_pages(get_req_seq_length(i));
             log.log(ss.str());
         }
     }
@@ -176,7 +176,7 @@ public:
     {
         u64 free_kvblocks;
 
-        free_kvblocks = PAGES_TO_KVBLOCKS_MEGACACHE(cuda_pages.size());
+        free_kvblocks = cuda_pages.size();
 
         return free_kvblocks + get_num_overcommitted_kvblocks();
     }

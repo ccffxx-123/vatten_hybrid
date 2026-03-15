@@ -7,6 +7,7 @@ from sarathi.model_executor.attention import get_attn_type
 import math
 from sarathi.config import ModelConfig, ParallelConfig
 
+# 按照 block 管理
 class vAttentionBlockSpaceManager():
 
     def __init__(self, 
@@ -98,96 +99,3 @@ class vAttentionBlockSpaceManager():
     
     def get_num_free_gpu_blocks(self, seq: Sequence) -> int:
         return self.free_blocks
-
-
-# class BaseBlockSpaceManager(ABC):
-#     """Manages the mapping between logical and physical token blocks."""
-
-#     def __init__(
-#         self,
-#         block_size: int,
-#         num_gpu_blocks: int,
-#         max_model_len: int,
-#         watermark: float = 0.01,
-#     ) -> None:
-#         self.block_size = block_size
-#         self.num_total_gpu_blocks = num_gpu_blocks
-#         self.max_model_len = max_model_len
-
-#         self.watermark = watermark
-#         assert watermark >= 0.0
-
-#         self.watermark_blocks = int(watermark * num_gpu_blocks)
-#         self.gpu_allocator = BlockAllocator(block_size, num_gpu_blocks)
-#         # Mapping: seq_id -> BlockTable.
-#         self.block_tables: Dict[int, BlockTable] = {}
-
-#     @abstractmethod
-#     def get_num_initial_blocks(self, seq: Sequence) -> int:
-#         """Returns the number of blocks to allocate for a request initially."""
-#         pass
-
-#     def can_allocate(self, seq: Sequence) -> bool:
-#         # FIXME(woosuk): Here we assume that all sequences in the group share
-#         # the same prompt. This may not be true for preempted sequences.
-#         num_required_blocks = self.get_num_initial_blocks(seq)
-#         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
-#         # Use watermark to avoid frequent cache eviction.
-#         return num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks
-
-#     def allocate(self, seq: Sequence) -> None:
-#         # Allocate new physical token blocks that will store the prompt tokens.
-#         block_table: BlockTable = []
-#         num_initial_blocks = self.get_num_initial_blocks(seq)
-#         for _ in range(num_initial_blocks):
-#             block = self.gpu_allocator.allocate()
-#             block_table.append(block)
-
-#         self.block_tables[seq.seq_id] = block_table
-
-#     def can_append_slot(self) -> bool:
-#         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
-#         return num_free_gpu_blocks > 0
-
-#     def append_slot(self, seq: Sequence) -> None:
-#         """Allocate a physical slot for a new token."""
-#         logical_blocks = seq.logical_token_blocks
-#         block_table = self.block_tables[seq.seq_id]
-
-#         if len(block_table) < len(logical_blocks):
-#             # The sequence has a new logical block.
-#             # Allocate a new physical block.
-#             block = self.gpu_allocator.allocate()
-#             block_table.append(block)
-
-#     def _get_physical_blocks(self, seq: Sequence) -> BlockTable:
-#         assert seq.is_executing()
-#         return self.block_tables[seq.seq_id]
-
-#     def _free_block_table(self, block_table: BlockTable) -> None:
-#         for block in set(block_table):
-#             self.gpu_allocator.free(block)
-
-#     def free(self, seq: Sequence) -> None:
-#         if seq.seq_id not in self.block_tables:
-#             # Already freed or haven't been scheduled yet.
-#             return
-#         block_table = self.block_tables[seq.seq_id]
-#         self._free_block_table(block_table)
-#         del self.block_tables[seq.seq_id]
-
-#     def reset(self) -> None:
-#         for block_table in self.block_tables.values():
-#             self._free_block_table(block_table)
-#         self.block_tables.clear()
-
-#     def get_block_table(self, seq: Sequence) -> List[int]:
-#         block_table = self.block_tables[seq.seq_id]
-#         return [block.block_number for block in block_table]
-
-#     def get_num_free_gpu_blocks(self) -> int:
-#         return self.gpu_allocator.get_num_free_blocks()
-
-#     def is_allocated(self, seq: Sequence) -> bool:
-#         return seq.seq_id in self.block_tables
-# 

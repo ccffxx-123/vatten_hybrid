@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 import math
 from sarathi.config import ModelConfig, ParallelConfig
 
-
+# 按照 page_size管理
 class vAttentionBlockSpaceManager():
 
     def __init__(self,

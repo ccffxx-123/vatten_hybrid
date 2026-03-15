@@ -220,7 +220,8 @@ class ModelConfig:
             val = getattr(self.hf_config, key, None)
             if val is not None:
                 return int(val)
-
+        
+        # return getattr(self.hf_config, "ssm_state_size", 128)
         return 0
 
     def get_window_size(self) -> int:
@@ -274,7 +275,12 @@ class ModelConfig:
         total = self.hf_config.num_hidden_layers
 
         # ---- Strategy 1: explicit per-layer list ----
-        block_types = getattr(self.hf_config, "layer_types", None)
+        block_types = None
+        # 按优先级依次查找可能存在的键名
+        for key in ("layer_types", "layers_block_type", "layer_block_types"):
+            block_types = getattr(self.hf_config, key, None)
+            if block_types is not None:
+                break  # 只要找到一个，就立刻跳出循环
         if block_types is not None:
             assert len(block_types) == total, (
                 f"layer_types length ({len(block_types)}) "
@@ -283,6 +289,10 @@ class ModelConfig:
             _TRANS = {"full_attention", "transformer", "attention"}
             _SWA   = {"sliding_window", "sliding_attention"}
             _STATE = {"mamba", "state", "ssm", "recurrent"}
+
+            # 过滤掉类似 "mlp" 这种不属于注意力或状态计算的核心层
+            # 这对 Nemotron-H 非常关键
+            block_types = [t.lower() for t in block_types if t.lower() != "mlp"]
 
             n_trans = n_swa = n_state = 0
             for t in block_types:
@@ -348,12 +358,18 @@ class ModelConfig:
         _STATE = {"mamba", "state", "ssm", "recurrent"}
 
         # ---- Strategy 1: explicit per-layer list ----
-        block_types = getattr(self.hf_config, "layer_types", None)
+        block_types = None
+        # 按优先级依次查找可能存在的键名
+        for key in ("layer_types", "layers_block_type", "layer_block_types"):
+            block_types = getattr(self.hf_config, key, None)
+            if block_types is not None:
+                break  # 只要找到一个，就立刻跳出循环
         if block_types is not None:
             assert len(block_types) == total, (
                 f"layer_types length ({len(block_types)}) "
                 f"!= num_hidden_layers ({total})"
             )
+            block_types = [t.lower() for t in block_types if t.lower() != "mlp"]
             result: List[str] = []
             for t in block_types:
                 t_lower = t.lower()
@@ -390,6 +406,7 @@ class ModelConfig:
         """Return True if the model mixes more than one layer type."""
         counts = self.get_num_layers_by_type()
         return sum(1 for c in counts if c > 0) > 1
+
 
 
 class CacheConfig:

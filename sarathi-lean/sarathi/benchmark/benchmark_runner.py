@@ -69,8 +69,9 @@ class BenchmarkRunner:
         self._llm_engine = LLMEngine.from_engine_args(
             # replica config
             replica_id=replica_id,
-            replica_resource_mapping=replica_resource_mapping,
-            # replica_resource_mapping=[("", 3)],
+            # replica_resource_mapping=replica_resource_mapping,
+            # replica_resource_mapping=[("", 0)],
+            replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
             output_dir=output_dir,
             # model config
             model=self._config.model_name,
@@ -79,7 +80,7 @@ class BenchmarkRunner:
             pipeline_parallel_size=self._config.model_pipeline_parallel_degree,
             attention_backend=self._config.model_attention_backend,
             seed=self._config.seed,
-            dtype="float16",
+            dtype='bfloat16',
             load_format=self._config.model_load_format,
             gpu_memory_utilization=self._config.gpu_memory_utilization,
             max_model_len=self._config.model_max_model_len,

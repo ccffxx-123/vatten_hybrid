@@ -263,6 +263,7 @@ class Gemma3Attention(nn.Module):
         max_position_embeddings: int,
         attention_bias: bool = False,
         layer_id: Optional[int] = None,
+        group_idx: int = 0,           # ← 新增：本层对应的 KVCacheGroup 下标
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -272,6 +273,7 @@ class Gemma3Attention(nn.Module):
             sliding_window if attention_type == "sliding_attention" else None
         )
         self.layer_id = layer_id
+        self.group_idx = group_idx    # ← 保存，forward 时传给 attention wrapper
 
         tp_size = get_tensor_model_parallel_world_size()
 
@@ -406,6 +408,7 @@ class Gemma3Attention(nn.Module):
             self.layer_id,
             attention_type=self.attention_type,
             sliding_window=self.sliding_window,
+            group_idx=self.group_idx,   # ← 传入正确的 group_idx
         )
 
         output, _ = self.o_proj(attn_output)
@@ -424,6 +427,7 @@ class Gemma3DecoderLayer(nn.Module):
         config: Gemma3Config,
         layer_id: int,
         layer_type: str,
+        group_idx: int,    # ← 新增
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -443,6 +447,7 @@ class Gemma3DecoderLayer(nn.Module):
             max_position_embeddings=config.max_position_embeddings,
             attention_bias=config.attention_bias,
             layer_id=layer_id,
+            group_idx=group_idx,    # ← 新增
         )
 
         self.mlp = Gemma3MLP(
@@ -539,17 +544,74 @@ class Gemma3Model(nn.Module):
         )
         layer_offset = get_pipeline_model_parallel_rank() * num_layers
 
+        # self.layers = nn.ModuleList()
+        # for layer_id in range(num_layers):
+        #     global_layer_id = layer_id + layer_offset
+        #     layer_type = self.config.layer_types[global_layer_id]
+        #     self.layers.append(
+        #         Gemma3DecoderLayer(
+        #             self.config,
+        #             layer_id=global_layer_id,
+        #             layer_type=layer_type,
+        #         )
+        #     )
+
+
+        # 构建 global_layer_id → group_idx 映射
+        # Gemma3 是纯注意力混合模型（full_attention + sliding_attention），
+        # 按照 build_kv_cache_config 的分组算法：
+        #   group_size = min(n_full, n_swa)
+        #   _TYPE_ORDER = ("trans", "swa", "state")
+        #   先放 trans 的若干组，再放 swa 的若干组
+        # 因此只需复用 ModelConfig.get_layer_type_list() + 分组逻辑即可。
+        # 为避免循环依赖，这里直接内联计算（与 _build_layer_to_group_idx 相同逻辑）。
+        import math
+        _TYPE_ORDER_ATTN = ("trans", "swa")   # Gemma3 没有 state 层
+        layer_type_list = self.config.layer_types  # 原始全局列表
+    
+        # 按类型收集 global_layer_id（Gemma3 全部都是注意力层，无 mlp 独立层）
+        ids_by_type = {"trans": [], "swa": []}
+        _TYPE_MAP = {
+            "full_attention":    "trans",
+            "sliding_attention": "swa",
+        }
+        for gid, lt in enumerate(layer_type_list):
+            sarathi_type = _TYPE_MAP.get(lt)
+            if sarathi_type:
+                ids_by_type[sarathi_type].append(gid)
+    
+        present = {t for t, ids in ids_by_type.items() if ids}
+        counts = {t: len(ids_by_type[t]) for t in present}
+        group_size_g3 = min(counts.values()) if counts else 1
+    
+        layer_to_group_idx: dict = {}
+        group_counter = 0
+        for sarathi_type in _TYPE_ORDER_ATTN:
+            if sarathi_type not in present:
+                continue
+            ids = ids_by_type[sarathi_type]
+            for chunk_start in range(0, len(ids), group_size_g3):
+                chunk = ids[chunk_start: chunk_start + group_size_g3]
+                for gid in chunk:
+                    layer_to_group_idx[gid] = group_counter
+                group_counter += 1
+    
+        # 构建层列表，传入 group_idx
         self.layers = nn.ModuleList()
         for layer_id in range(num_layers):
             global_layer_id = layer_id + layer_offset
             layer_type = self.config.layer_types[global_layer_id]
+            group_idx = layer_to_group_idx.get(global_layer_id, 0)
             self.layers.append(
                 Gemma3DecoderLayer(
                     self.config,
                     layer_id=global_layer_id,
                     layer_type=layer_type,
+                    group_idx=group_idx,      # ← 新增
                 )
             )
+
+
 
         # Final norm (last pipeline stage only).
         self.norm = None

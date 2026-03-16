@@ -31,30 +31,19 @@ sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=30)
 llm_engine = LLMEngine.from_engine_args(
     # 模型路径 (HuggingFace ID 或本地路径)
 
-    # muti-model
-    # model="google/gemma-3-12b-it",
-    # model="meta-llama/Llama-3.2-11B-Vision", 
-    # model="meta-llama/Llama-4-Scout-17B-16E",  # 109B （使用 Int8 量化）
-
     # sliding attention
-    # model="mistralai/Ministral-8B-Instruct-2410",   # 窗口，1024 * 32(32768) 3:1(32)
-    # model="google/gemma-2-9b",                 # 窗口，1024 * 4(4096)
     # model="google/gemma-3-4b-it",       # 窗口1024  29:5 
     # model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
     # dtype="bfloat16",  # <--- 明确指定使用 bfloat16 (或者写 "auto")
     
-
     # SSM-Transformer
-    # model="ai21labs/AI21-Jamba-Mini-1.6",  # 28:4, 76，0
-    # model="ibm-ai-platform/Bamba-9B-v2",     # 29:3  20, 0
-    model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
+    # model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
 
     # SSM-Transformer-swa
     # model="microsoft/Phi-4-mini-flash-reasoning",  # full + SWA（嵌入Mamba（all 10 MB）） (Samba，适合)
-    # model="nvidia/Hymba-1.5B-Instruct",  # 相邻层共享KVclear
 
     # Transformer
-    # model="meta-llama/Meta-Llama-3-8B",
+    model="meta-llama/Meta-Llama-3-8B",
 
     
     
@@ -80,21 +69,21 @@ llm_engine = LLMEngine.from_engine_args(
     # --- Attention 后端 ---
     # attention_backend="fi_vattn",
     # attention_backend="fi_paged",
-    # attention_backend="fi_paged_hybird",
-    attention_backend="fa_paged_hybird",
+    attention_backend="fi_paged_hybird",
+    # attention_backend="fa_paged_hybird",
     gpu_memory_utilization=0.6,
 
 
     # block_size=2 * MB, # KV Cache 块大小
-    # block_size=16, # KV Cache 块大小
-    block_size=256, # KV Cache 块大小
+    block_size=16, # KV Cache 块大小
+    # block_size=256, # KV Cache 块大小
 
     # max_num_batched_tokens=self._config.vllm_scheduler_max_tokens_in_batch,
     enable_op_level_metrics=False,
 
     # load_format="dummy",
     # replica_resource_mapping=[("", 0)],  # 改这里，0→2
-    replica_resource_mapping=[("", 1), ("", 3)],  # 用 GPU 2 和 GPU 3
+    replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
 )
 
 

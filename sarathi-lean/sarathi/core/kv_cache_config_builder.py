@@ -359,7 +359,7 @@ def _compute_adjusted_block_size(
     # 3. 计算满足条件的最小 block_size
     #    block_size * kv_hidden_size >= mamba_state_size
     min_block_size = math.ceil(mamba_state_size / kv_hidden_size)
-    min_block_size = math.ceil(min_block_size / 256.0) * 256
+    # min_block_size = math.ceil(min_block_size / 256.0) * 256
 
     if min_block_size > block_size:
         logger.warning(
@@ -370,9 +370,6 @@ def _compute_adjusted_block_size(
             f"（对应 vLLM 文档 Case 4）"
         )
         block_size = min_block_size
-
-    
-
     return block_size
 
 

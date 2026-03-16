@@ -1,32 +1,36 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
-from flash_attn import flash_attn_with_kvcache  # Flash Attention库，高效注意力实现
+from flash_attn import flash_attn_with_kvcache
 
 from sarathi.config import ModelConfig, ParallelConfig
 from sarathi.core.datatypes.sequence import SequenceMetadata
 from sarathi.logger import init_logger
 from sarathi.metrics.constants import OperationMetrics
 from sarathi.model_executor.attention.base_attention_wrapper import BaseAttentionWrapper
-from sarathi.cache_ops import reshape_and_cache_flash  # 自定义CUDA kernel，用于高效写入KV Cache
+from sarathi.cache_ops import reshape_and_cache_flash
 
 logger = init_logger(__name__)
 
 
 class FlashAttentionWrapper(BaseAttentionWrapper):
     """
-    基于Flash Attention的注意力包装器实现。
-    
-    Flash Attention是一种IO感知的精确注意力算法，通过分块计算和减少HBM访问
-    来实现更快的注意力计算和更低的内存占用。
-    
-    本类结合了：
-    1. Flash Attention的高效计算
-    2. PagedAttention的分页KV Cache管理
-    3. Prefill和Decode两种模式的处理
+    基于 Flash Attention 的注意力包装器。
+
+    兼容两条路径
+    ------------
+    A. 纯 vLLM 路径（原有行为，完全不变）
+       SequenceMetadata.block_tables is None
+       → 只有 group-0，使用 block_table 字段
+       → forward 不传 group_idx（默认 0）
+
+    B. 混合模型路径（新增）
+       SequenceMetadata.block_tables is not None
+       → begin_forward 为每个 group_idx 独立构建一套元数据
+       → forward 传入 group_idx 选取对应元数据
     """
-    
-    _inst = None  # 单例实例
+
+    _inst = None
 
     def init(
         self,
@@ -35,179 +39,132 @@ class FlashAttentionWrapper(BaseAttentionWrapper):
         block_size: int,
         device: torch.device,
     ):
-        """
-        初始化Flash Attention包装器。
-        
-        除了父类的基本参数外，还初始化了用于管理prefill和decode阶段的各种状态变量。
-        """
-        # 调用父类初始化
         super().init(model_config, parallel_config, block_size, device)
 
-        # ==================== 状态标志 ====================
-        self.is_metadata_initialized = False  # 元数据是否已初始化
-        self.is_profiling_iteration = False   # 是否处于性能分析模式（跳过实际计算）
-        
-        # ==================== Prefill阶段的数据结构 ====================
-        # Prefill: 处理prompt的阶段，一次处理多个token
-        self.prefill_query_lens: List[int] = None           # 每个prefill序列的query长度
-        self.prefill_cache_lens: List[torch.Tensor] = None  # 每个prefill序列已缓存的长度
-        self.prefill_block_tables: List[torch.Tensor] = None  # 每个prefill序列的块表
-        
-        # ==================== Decode阶段的数据结构 ====================
-        # Decode: 自回归生成阶段，每次只处理1个token
-        self.decode_cache_len: torch.Tensor = None    # decode序列的缓存长度（批量）
-        self.decode_block_table: torch.Tensor = None  # decode序列的块表（批量，需要padding）
-        
-        # ==================== Slot映射 ====================
-        # Slot: KV Cache中的具体存储位置 = block_number * block_size + block_offset
-        self.prefix_plus_current_prompt_tokens_slot_mapping: torch.Tensor = None  # prefill的slot映射
-        self.current_tokens_slot_mapping: torch.Tensor = None  # decode的slot映射
+        self.is_metadata_initialized = False
+        self.is_profiling_iteration = False
+
+        # ── 路径 A（原生 vLLM）：保留原有单套变量，确保零改动 ──
+        self.prefill_query_lens: List[int] = None
+        self.prefill_cache_lens: List[torch.Tensor] = None
+        self.prefill_block_tables: List[torch.Tensor] = None
+        self.decode_cache_len: torch.Tensor = None
+        self.decode_block_table: torch.Tensor = None
+        self.prefix_plus_current_prompt_tokens_slot_mapping: torch.Tensor = None
+        self.current_tokens_slot_mapping: torch.Tensor = None
+
+        # ── 路径 B（混合模型）：按 group_idx 存放多套元数据 ──
+        self._group_meta: Dict[int, dict] = {}
+
+        # 标记当前 batch 是否走混合路径
+        self._is_hybrid: bool = False
+
+    # ------------------------------------------------------------------
+    # 缓存块分配
+    # ------------------------------------------------------------------
 
     def get_cache_block(
         self, num_blocks: int, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        创建KV Cache块（用于内存预分配）。
-        
-        Flash Attention要求特定的内存布局：[num_blocks, block_size, num_kv_heads, head_dim]
-        这与标准的[batch, seq, heads, dim]不同，是为了支持分页访问。
-        
-        Args:
-            num_blocks: 要分配的块数量
-            **kwargs: 传递给torch.randn的额外参数（如dtype, device）
-        
-        Returns:
-            (k_cache, v_cache): 分别用于存储Key和Value的缓存张量
-        
-        注意：使用randn初始化是为了内存分配，实际值会被覆盖
-        """
         k_cache = torch.randn(
-            num_blocks,
-            self.block_size,      # 每个块的大小（如16个token）
-            self.num_kv_heads,    # KV头数量
-            self.head_dim,        # 每个头的维度
-            **kwargs,
+            num_blocks, self.block_size, self.num_kv_heads, self.head_dim, **kwargs
         )
         v_cache = torch.randn(
-            num_blocks,
-            self.block_size,
-            self.num_kv_heads,
-            self.head_dim,
-            **kwargs,
+            num_blocks, self.block_size, self.num_kv_heads, self.head_dim, **kwargs
         )
-
         return k_cache, v_cache
+
+    # ------------------------------------------------------------------
+    # begin_forward：自动判断路径
+    # ------------------------------------------------------------------
 
     def begin_forward(
         self,
         seq_metadata_list: List[SequenceMetadata],
     ) -> None:
-        """
-        准备前向传播所需的所有元数据。
-        
-        这是整个类最复杂的方法，负责：
-        1. 区分prefill和decode序列
-        2. 计算每个序列的块表（block table）
-        3. 计算slot映射（将逻辑位置映射到物理存储位置）
-        
-        PagedAttention核心概念：
-        - Block Table: 记录每个序列使用了哪些物理块
-        - Slot: 具体的存储位置 = block_id * block_size + offset
-        """
-        
-        # ==================== 临时列表，用于收集数据 ====================
-        prefill_query_lens: List[int] = []           # prefill序列的query长度
-        prefill_cache_lens: List[List[int]] = []     # prefill序列的已缓存长度
-        decode_cache_len: List[int] = []             # decode序列的缓存长度
-        prefill_block_tables: List[List[int]] = []   # prefill序列的块表
-        decode_block_table: List[List[int]] = []     # decode序列的块表
-        prefix_plus_current_prompt_tokens_slot_mapping: List[int] = []  # prefill的slot映射
-        current_tokens_slot_mapping: List[int] = []  # decode的slot映射
-
-        # 重置状态标志
         self.is_profiling_iteration = False
         self.is_metadata_initialized = True
 
-        # ==================== 第一遍遍历：处理Prefill序列 ====================
+        # 检测是否为混合模型路径（任意一个 seq 有 block_tables 即为混合）
+        self._is_hybrid = any(
+            sm.block_tables is not None for sm in seq_metadata_list
+        )
+
+        if self._is_hybrid:
+            self._begin_forward_hybrid(seq_metadata_list)
+        else:
+            self._begin_forward_vllm(seq_metadata_list)
+
+    # ------------------------------------------------------------------
+    # 路径 A：原生 vLLM begin_forward（原代码，一字不改）
+    # ------------------------------------------------------------------
+
+    def _begin_forward_vllm(
+        self,
+        seq_metadata_list: List[SequenceMetadata],
+    ) -> None:
+        prefill_query_lens: List[int] = []
+        prefill_cache_lens: List[List[int]] = []
+        decode_cache_len: List[int] = []
+        prefill_block_tables: List[List[int]] = []
+        decode_block_table: List[List[int]] = []
+        prefix_plus_current_prompt_tokens_slot_mapping: List[int] = []
+        current_tokens_slot_mapping: List[int] = []
+
         for seq_metadata in seq_metadata_list:
             if not seq_metadata.is_prompt:
-                continue  # 跳过decode序列
-            
-            # 性能分析模式检测：block_table为None说明还在内存分析阶段
-            if seq_metadata.block_table is None:
-                self.is_profiling_iteration = True
-                return  # 直接返回，不执行实际计算
+                continue
 
-            # ---------- 获取序列长度信息 ----------
-            prompt_chunk_len = seq_metadata.prompt_chunk_len  # 配置的chunk大小
-            # 实际要处理的prompt长度（可能因为chunked prefill而分多次处理）
-            current_prompt_chunk_len = seq_metadata.seq.get_next_prompt_chunk_len(
-                prompt_chunk_len
-            )
-            # 已经处理过的prompt token数
-            processed_prompt_len = seq_metadata.seq.get_num_prompt_tokens_processed()
-            # 处理完当前chunk后的总长度
-            current_total_len = processed_prompt_len + current_prompt_chunk_len
-
-            # 记录query长度和缓存长度
-            prefill_query_lens.append(current_prompt_chunk_len)
-            prefill_cache_lens.append([processed_prompt_len])
-
-            # ---------- 计算需要的块数量和块表 ----------
-            # 向上取整计算需要多少个块
-            num_blocks_in_use = (
-                current_total_len + self.block_size - 1
-            ) // self.block_size
-            # 截取实际使用的块表部分
-            prefill_block_tables.append(seq_metadata.block_table[:num_blocks_in_use])
-            seq_blc_table = seq_metadata.block_table[:num_blocks_in_use]
-            
-            # ---------- 计算Slot映射 ----------
-            # Slot映射将逻辑token位置转换为KV Cache中的物理位置
-            context_end = processed_prompt_len + current_prompt_chunk_len
-            context_start = 0
-            
-            for i in range(context_end):
-                # 计算token i 所在的物理块号
-                block_number = seq_blc_table[i // self.block_size]
-                # 计算在块内的偏移
-                block_offset = i % self.block_size
-                # 计算最终的slot位置
-                slot = (block_number) * self.block_size + block_offset
-                
-                # 只记录当前chunk需要写入的token的slot
-                # （之前的chunk已经写入过了）
-                if i >= processed_prompt_len:
-                    prefix_plus_current_prompt_tokens_slot_mapping.append(slot)
-
-        # ==================== 第二遍遍历：处理Decode序列 ====================
-        for seq_metadata in seq_metadata_list:
-            if seq_metadata.is_prompt:
-                continue  # 跳过prefill序列
-
-            # 性能分析模式检测
             if seq_metadata.block_table is None:
                 self.is_profiling_iteration = True
                 return
 
-            # ---------- 获取序列信息 ----------
-            context_len = seq_metadata.seq.get_len()  # 当前序列总长度
-            decode_cache_len.append(context_len - 1)  # 缓存长度 = 总长度 - 1（当前token还没写入）
-            position = context_len - 1  # 当前token的位置
-            
-            # 记录块表
+            prompt_chunk_len = seq_metadata.prompt_chunk_len
+            current_prompt_chunk_len = seq_metadata.seq.get_next_prompt_chunk_len(
+                prompt_chunk_len
+            )
+            processed_prompt_len = seq_metadata.seq.get_num_prompt_tokens_processed()
+            current_total_len = processed_prompt_len + current_prompt_chunk_len
+
+            prefill_query_lens.append(current_prompt_chunk_len)
+            prefill_cache_lens.append([processed_prompt_len])
+
+            num_blocks_in_use = (
+                current_total_len + self.block_size - 1
+            ) // self.block_size
+            prefill_block_tables.append(
+                seq_metadata.block_table[:num_blocks_in_use]
+            )
+            seq_blc_table = seq_metadata.block_table[:num_blocks_in_use]
+
+            context_end = processed_prompt_len + current_prompt_chunk_len
+            for i in range(context_end):
+                block_number = seq_blc_table[i // self.block_size]
+                block_offset = i % self.block_size
+                slot = (block_number) * self.block_size + block_offset
+                if i >= processed_prompt_len:
+                    prefix_plus_current_prompt_tokens_slot_mapping.append(slot)
+
+        for seq_metadata in seq_metadata_list:
+            if seq_metadata.is_prompt:
+                continue
+
+            if seq_metadata.block_table is None:
+                self.is_profiling_iteration = True
+                return
+
+            context_len = seq_metadata.seq.get_len()
+            decode_cache_len.append(context_len - 1)
+            position = context_len - 1
+
             decode_block_table.append(seq_metadata.block_table)
-            
-            # ---------- 计算当前token的Slot ----------
+
             gen_blc_table = seq_metadata.block_table
             block_number = gen_blc_table[position // self.block_size]
             block_offset = position % self.block_size
             slot = block_number * self.block_size + block_offset
             current_tokens_slot_mapping.append(slot)
 
-        # ==================== 转换为Tensor并存储 ====================
-        
-        # Prefill相关数据
         self.prefill_query_lens = prefill_query_lens
         self.prefill_cache_lens = [
             torch.tensor(cache_lens, dtype=torch.int32, device=self.device)
@@ -215,200 +172,442 @@ class FlashAttentionWrapper(BaseAttentionWrapper):
         ]
         self.prefill_block_tables = [
             torch.tensor(block_table, dtype=torch.int32, device=self.device).reshape(
-                1, -1  # 添加batch维度
+                1, -1
             )
             for block_table in prefill_block_tables
         ]
         self.prefix_plus_current_prompt_tokens_slot_mapping = torch.tensor(
-            prefix_plus_current_prompt_tokens_slot_mapping, dtype=torch.long, device=self.device
+            prefix_plus_current_prompt_tokens_slot_mapping,
+            dtype=torch.long,
+            device=self.device,
         )
 
-        # 如果没有decode序列，提前返回
         if decode_cache_len == []:
             return
 
-        # Decode相关数据
         self.decode_cache_len = torch.tensor(
             decode_cache_len, dtype=torch.int32, device=self.device
         )
 
-        # ---------- Decode块表需要Padding ----------
-        # 不同序列可能使用不同数量的块，需要padding到相同长度才能批量处理
         max_decode_blocks = max(len(seq_block) for seq_block in decode_block_table)
         decode_block_table_padded = [
-            seq_block + [-1] * (max_decode_blocks - len(seq_block))  # 用-1填充
+            seq_block + [-1] * (max_decode_blocks - len(seq_block))
             for seq_block in decode_block_table
         ]
         self.decode_block_table = torch.tensor(
             decode_block_table_padded, dtype=torch.int32, device=self.device
         )
-        
         self.current_tokens_slot_mapping = torch.tensor(
             current_tokens_slot_mapping, dtype=torch.long, device=self.device
         )
 
-    def end_forward(self):
-        """
-        清理前向传播的状态。
-        
-        重置所有元数据，为下一个batch做准备。
-        """
-        self.is_metadata_initialized = False
+    # ------------------------------------------------------------------
+    # 路径 B：混合模型 begin_forward
+    # ------------------------------------------------------------------
 
+    def _begin_forward_hybrid(
+        self,
+        seq_metadata_list: List[SequenceMetadata],
+    ) -> None:
+        self._group_meta = {}
+
+        num_groups = 1
+        for sm in seq_metadata_list:
+            if sm.block_tables is not None:
+                num_groups = len(sm.block_tables)
+                break
+
+        for group_idx in range(num_groups):
+            self._build_group_meta(seq_metadata_list, group_idx)
+
+    @staticmethod
+    def _get_block_table_for_group(
+        seq_metadata: SequenceMetadata, group_idx: int
+    ) -> Optional[List[int]]:
+        """从 block_tables[group_idx] 取，越界或 block_tables 为 None 时退化到 block_table。"""
+        if seq_metadata.block_tables is not None:
+            tables = seq_metadata.block_tables
+            if group_idx < len(tables):
+                return tables[group_idx]
+            logger.warning(
+                f"group_idx={group_idx} 超出 block_tables 长度 "
+                f"{len(tables)}，退化使用 group-0。"
+            )
+            return tables[0]
+        return seq_metadata.block_table
+
+    def _build_group_meta(
+        self,
+        seq_metadata_list: List[SequenceMetadata],
+        group_idx: int,
+    ) -> None:
+        prefill_query_lens: List[int] = []
+        prefill_cache_lens: List[List[int]] = []
+        decode_cache_len_list: List[int] = []
+        prefill_block_tables: List[List[int]] = []
+        decode_block_table: List[List[int]] = []
+        prefix_plus_current_slot_mapping: List[int] = []
+        current_tokens_slot_mapping: List[int] = []
+
+        # ---- Prefill ----
+        for seq_metadata in seq_metadata_list:
+            if not seq_metadata.is_prompt:
+                continue
+
+            block_table = self._get_block_table_for_group(seq_metadata, group_idx)
+            if block_table is None:
+                self.is_profiling_iteration = True
+                self._group_meta[group_idx] = {}
+                return
+
+            prompt_chunk_len = seq_metadata.prompt_chunk_len
+            current_prompt_chunk_len = seq_metadata.seq.get_next_prompt_chunk_len(
+                prompt_chunk_len
+            )
+            processed_prompt_len = seq_metadata.seq.get_num_prompt_tokens_processed()
+            current_total_len = processed_prompt_len + current_prompt_chunk_len
+
+            prefill_query_lens.append(current_prompt_chunk_len)
+            prefill_cache_lens.append([processed_prompt_len])
+
+            num_blocks_in_use = (
+                current_total_len + self.block_size - 1
+            ) // self.block_size
+            seq_blc_table = block_table[:num_blocks_in_use]
+            prefill_block_tables.append(seq_blc_table)
+
+            context_end = processed_prompt_len + current_prompt_chunk_len
+            for i in range(context_end):
+                block_number = seq_blc_table[i // self.block_size]
+                block_offset = i % self.block_size
+                slot = block_number * self.block_size + block_offset
+                if i >= processed_prompt_len:
+                    prefix_plus_current_slot_mapping.append(slot)
+
+        # ---- Decode ----
+        for seq_metadata in seq_metadata_list:
+            if seq_metadata.is_prompt:
+                continue
+
+            block_table = self._get_block_table_for_group(seq_metadata, group_idx)
+            if block_table is None:
+                self.is_profiling_iteration = True
+                self._group_meta[group_idx] = {}
+                return
+
+            context_len = seq_metadata.seq.get_len()
+            decode_cache_len_list.append(context_len - 1)
+            decode_block_table.append(block_table)
+
+            position = context_len - 1
+            block_number = block_table[position // self.block_size]
+            block_offset = position % self.block_size
+            slot = block_number * self.block_size + block_offset
+            current_tokens_slot_mapping.append(slot)
+
+        # ---- 转 Tensor ----
+        meta: dict = {
+            "prefill_query_lens": prefill_query_lens,
+            "prefill_cache_lens": [
+                torch.tensor(cl, dtype=torch.int32, device=self.device)
+                for cl in prefill_cache_lens
+            ],
+            "prefill_block_tables": [
+                torch.tensor(bt, dtype=torch.int32, device=self.device).reshape(1, -1)
+                for bt in prefill_block_tables
+            ],
+            "prefix_slot_mapping": torch.tensor(
+                prefix_plus_current_slot_mapping,
+                dtype=torch.long,
+                device=self.device,
+            ),
+            "decode_cache_len": None,
+            "decode_block_table": None,
+            "current_slot_mapping": None,
+        }
+
+        if decode_cache_len_list:
+            max_decode_blocks = max(len(bt) for bt in decode_block_table)
+            decode_block_table_padded = [
+                bt + [-1] * (max_decode_blocks - len(bt))
+                for bt in decode_block_table
+            ]
+            meta["decode_cache_len"] = torch.tensor(
+                decode_cache_len_list, dtype=torch.int32, device=self.device
+            )
+            meta["decode_block_table"] = torch.tensor(
+                decode_block_table_padded, dtype=torch.int32, device=self.device
+            )
+            meta["current_slot_mapping"] = torch.tensor(
+                current_tokens_slot_mapping, dtype=torch.long, device=self.device
+            )
+
+        self._group_meta[group_idx] = meta
+
+    # ------------------------------------------------------------------
+    # end_forward
+    # ------------------------------------------------------------------
+
+    def end_forward(self):
+        self.is_metadata_initialized = False
+        self._is_hybrid = False
+
+        # 清理路径 A
         self.prefill_query_lens = None
         self.prefill_cache_lens = None
         self.prefill_block_tables = None
         self.decode_cache_len = None
         self.decode_block_table = None
+        self.prefix_plus_current_prompt_tokens_slot_mapping = None
+        self.current_tokens_slot_mapping = None
+
+        # 清理路径 B
+        self._group_meta = {}
+
+    # ------------------------------------------------------------------
+    # forward：根据 _is_hybrid 分发，group_idx 仅在混合路径生效
+    # ------------------------------------------------------------------
 
     def forward(
         self,
-        query: torch.Tensor,   # [total_tokens, num_q_heads * head_dim]
-        key: torch.Tensor,     # [total_tokens, num_kv_heads * head_dim]
-        value: torch.Tensor,   # [total_tokens, num_kv_heads * head_dim]
-        kv_cache: Tuple[torch.Tensor, torch.Tensor],  # (k_cache, v_cache)
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: Tuple[torch.Tensor, torch.Tensor],
         softmax_scale: float = 1.0,
         layer_id: Optional[int] = None,
-        # 新增参数
         attention_type: str = "full_attention",
         sliding_window: Optional[int] = None,
+        group_idx: int = 0,
     ) -> torch.Tensor:
-        """
-        执行Flash Attention计算。
-        
-        整体流程：
-        1. 先处理所有prefill序列（可能有多个）
-        2. 再批量处理所有decode序列
-        
-        关键特点：
-        - Prefill序列逐个处理（因为长度可能不同）
-        - Decode序列批量处理（每个序列只有1个token，可以高效批处理）
-        """
-        
-        # 确保元数据已初始化
         assert self.is_metadata_initialized, "Metadata is not initialized."
 
-        # 性能分析模式：返回零张量，不执行实际计算
         if self.is_profiling_iteration:
             return torch.zeros_like(query)
 
-        token_offset = 0  # 追踪当前处理到的token位置
+        if self._is_hybrid:
+            return self._forward_hybrid(
+                query, key, value, kv_cache, softmax_scale, layer_id, group_idx
+            )
+        else:
+            return self._forward_vllm(
+                query, key, value, kv_cache, softmax_scale, layer_id
+            )
 
-        # 预分配输出张量
+    # ------------------------------------------------------------------
+    # 路径 A forward（原代码，一字不改）
+    # ------------------------------------------------------------------
+
+    def _forward_vllm(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: Tuple[torch.Tensor, torch.Tensor],
+        softmax_scale: float,
+        layer_id: Optional[int],
+    ) -> torch.Tensor:
+        token_offset = 0
         output = torch.empty_like(query, device=self.device)
 
-        # ==================== 处理Prefill序列 ====================
-        # 遍历每个prefill序列，逐个处理
         for prefill_cache_len, prefill_block_table, query_len in zip(
-            self.prefill_cache_lens, self.prefill_block_tables, self.prefill_query_lens
+            self.prefill_cache_lens,
+            self.prefill_block_tables,
+            self.prefill_query_lens,
         ):
-            # ---------- Step 1: 输入reshape ----------
-            # Flash Attention要求输入格式: [batch, seq_len, num_heads, head_dim]
             with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
-                seq_query = query[token_offset : token_offset + query_len].reshape(
-                    1, -1, self.num_q_heads, self.head_dim  # batch=1
+                seq_query = query[token_offset: token_offset + query_len].reshape(
+                    1, -1, self.num_q_heads, self.head_dim
                 )
-                seq_key = key[token_offset : token_offset + query_len].reshape(
+                seq_key = key[token_offset: token_offset + query_len].reshape(
                     1, -1, self.num_kv_heads, self.head_dim
                 )
-                seq_value = value[token_offset : token_offset + query_len].reshape(
+                seq_value = value[token_offset: token_offset + query_len].reshape(
                     1, -1, self.num_kv_heads, self.head_dim
                 )
-            
-            # ---------- Step 2: 写入KV Cache ----------
-            # 使用自定义CUDA kernel高效写入
+
             with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
-                # 获取当前chunk的slot映射
                 slot_mapping = self.prefix_plus_current_prompt_tokens_slot_mapping[
                     token_offset: token_offset + query_len
                 ]
-                assert slot_mapping is not None
-                
-                # reshape_and_cache_flash: 将KV写入到指定的slot位置
-                # 这是一个高效的scatter操作
                 reshape_and_cache_flash(
-                    seq_key.squeeze(0),    # 移除batch维度
+                    seq_key.squeeze(0),
                     seq_value.squeeze(0),
-                    kv_cache[0],           # k_cache
-                    kv_cache[1],           # v_cache
-                    slot_mapping,          # 写入位置
-                    "auto",                # 自动选择最佳实现
+                    kv_cache[0],
+                    kv_cache[1],
+                    slot_mapping,
+                    "auto",
                 )
 
-            # ---------- Step 3: 执行Prefill Attention ----------
             with self.get_timer(OperationMetrics.ATTN_PREFILL, layer_id):
                 seq_output = flash_attn_with_kvcache(
-                    seq_query,            # 当前的query
-                    kv_cache[0],          # k_cache（包含所有历史key）
-                    kv_cache[1],          # v_cache（包含所有历史value）
-                    # 注意：这里没有传入seq_key和seq_value，
-                    # 因为已经通过reshape_and_cache_flash写入了cache
-                    cache_seqlens=prefill_cache_len + query_len,  # 总的序列长度
-                    block_table=prefill_block_table,              # 块表
+                    seq_query,
+                    kv_cache[0],
+                    kv_cache[1],
+                    cache_seqlens=prefill_cache_len + query_len,
+                    block_table=prefill_block_table,
                     softmax_scale=softmax_scale,
-                    causal=True,          # 因果注意力（只能看到之前的token）
+                    causal=True,
                 )
 
-            # ---------- Step 4: 输出reshape并复制 ----------
             with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
-                # 将输出reshape回原始格式并复制到output
-                output[token_offset : token_offset + query_len].copy_(
+                output[token_offset: token_offset + query_len].copy_(
                     seq_output.reshape(-1, self.num_q_heads * self.head_dim)
                 )
 
-            token_offset += query_len  # 更新偏移量
+            token_offset += query_len
 
-        # ==================== 处理Decode序列 ====================
-        # 如果没有decode序列，直接返回
         if self.decode_cache_len is None:
             return output
 
         decode_batch_size = self.decode_cache_len.size(0)
 
-        # ---------- Step 1: 输入reshape ----------
-        # Decode时每个序列只有1个token，可以批量处理
         with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
             decode_query = query[
-                token_offset : token_offset + decode_batch_size
-            ].reshape(-1, 1, self.num_q_heads, self.head_dim)  # seq_len=1
-            
+                token_offset: token_offset + decode_batch_size
+            ].reshape(-1, 1, self.num_q_heads, self.head_dim)
             decode_key = key[
-                token_offset : token_offset + decode_batch_size
+                token_offset: token_offset + decode_batch_size
             ].reshape(-1, 1, self.num_kv_heads, self.head_dim)
-            
             decode_value = value[
-                token_offset : token_offset + decode_batch_size
+                token_offset: token_offset + decode_batch_size
             ].reshape(-1, 1, self.num_kv_heads, self.head_dim)
 
-        # ---------- Step 2: KV Cache写入（注释掉了） ----------
-        # 注意：decode的KV写入被注释掉了，改为在flash_attn_with_kvcache中直接处理
         with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
             slot_mapping = self.current_tokens_slot_mapping[
                 token_offset: token_offset + decode_batch_size
             ]
-            # 这里被注释掉了，说明flash_attn_with_kvcache会自动处理KV的写入
-            # reshape_and_cache_flash(decode_key, decode_value, ...)
 
-        # ---------- Step 3: 执行Decode Attention ----------
         with self.get_timer(OperationMetrics.ATTN_DECODE, layer_id):
             decode_output = flash_attn_with_kvcache(
                 decode_query,
-                kv_cache[0],          # k_cache
-                kv_cache[1],          # v_cache
-                decode_key,           # 当前的key（会被自动写入cache）
-                decode_value,         # 当前的value（会被自动写入cache）
-                cache_seqlens=self.decode_cache_len,  # 每个序列的缓存长度
-                block_table=self.decode_block_table,  # 批量块表
+                kv_cache[0],
+                kv_cache[1],
+                decode_key,
+                decode_value,
+                cache_seqlens=self.decode_cache_len,
+                block_table=self.decode_block_table,
                 softmax_scale=softmax_scale,
                 causal=True,
             )
 
-        # ---------- Step 4: 输出reshape并复制 ----------
         with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
-            output[token_offset : token_offset + decode_batch_size].copy_(
+            output[token_offset: token_offset + decode_batch_size].copy_(
                 decode_output.reshape(-1, self.num_q_heads * self.head_dim)
             )
 
         return output
-    
-    
+
+    # ------------------------------------------------------------------
+    # 路径 B forward（混合模型）
+    # ------------------------------------------------------------------
+
+    def _forward_hybrid(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: Tuple[torch.Tensor, torch.Tensor],
+        softmax_scale: float,
+        layer_id: Optional[int],
+        group_idx: int,
+    ) -> torch.Tensor:
+        meta = self._group_meta.get(group_idx)
+        if not meta:
+            return torch.zeros_like(query)
+
+        prefill_query_lens   = meta["prefill_query_lens"]
+        prefill_cache_lens   = meta["prefill_cache_lens"]
+        prefill_block_tables = meta["prefill_block_tables"]
+        prefix_slot_mapping  = meta["prefix_slot_mapping"]
+        decode_cache_len     = meta["decode_cache_len"]
+        decode_block_table   = meta["decode_block_table"]
+        current_slot_mapping = meta["current_slot_mapping"]
+
+        token_offset = 0
+        output = torch.empty_like(query, device=self.device)
+
+        for prefill_cache_len_t, prefill_block_table, query_len in zip(
+            prefill_cache_lens, prefill_block_tables, prefill_query_lens
+        ):
+            with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
+                seq_query = query[token_offset: token_offset + query_len].reshape(
+                    1, -1, self.num_q_heads, self.head_dim
+                )
+                seq_key = key[token_offset: token_offset + query_len].reshape(
+                    1, -1, self.num_kv_heads, self.head_dim
+                )
+                seq_value = value[token_offset: token_offset + query_len].reshape(
+                    1, -1, self.num_kv_heads, self.head_dim
+                )
+
+            with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
+                slot_mapping = prefix_slot_mapping[
+                    token_offset: token_offset + query_len
+                ]
+                reshape_and_cache_flash(
+                    seq_key.squeeze(0),
+                    seq_value.squeeze(0),
+                    kv_cache[0],
+                    kv_cache[1],
+                    slot_mapping,
+                    "auto",
+                )
+
+            with self.get_timer(OperationMetrics.ATTN_PREFILL, layer_id):
+                seq_output = flash_attn_with_kvcache(
+                    seq_query,
+                    kv_cache[0],
+                    kv_cache[1],
+                    cache_seqlens=prefill_cache_len_t + query_len,
+                    block_table=prefill_block_table,
+                    softmax_scale=softmax_scale,
+                    causal=True,
+                )
+
+            with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
+                output[token_offset: token_offset + query_len].copy_(
+                    seq_output.reshape(-1, self.num_q_heads * self.head_dim)
+                )
+
+            token_offset += query_len
+
+        if decode_cache_len is None:
+            return output
+
+        decode_batch_size = decode_cache_len.size(0)
+
+        with self.get_timer(OperationMetrics.ATTN_INPUT_RESHAPE, layer_id):
+            decode_query = query[
+                token_offset: token_offset + decode_batch_size
+            ].reshape(-1, 1, self.num_q_heads, self.head_dim)
+            decode_key = key[
+                token_offset: token_offset + decode_batch_size
+            ].reshape(-1, 1, self.num_kv_heads, self.head_dim)
+            decode_value = value[
+                token_offset: token_offset + decode_batch_size
+            ].reshape(-1, 1, self.num_kv_heads, self.head_dim)
+
+        with self.get_timer(OperationMetrics.ATTN_KV_CACHE_SAVE, layer_id):
+            _ = current_slot_mapping  # decode KV 由 flash_attn_with_kvcache 内部写入
+
+        with self.get_timer(OperationMetrics.ATTN_DECODE, layer_id):
+            decode_output = flash_attn_with_kvcache(
+                decode_query,
+                kv_cache[0],
+                kv_cache[1],
+                decode_key,
+                decode_value,
+                cache_seqlens=decode_cache_len,
+                block_table=decode_block_table,
+                softmax_scale=softmax_scale,
+                causal=True,
+            )
+
+        with self.get_timer(OperationMetrics.ATTN_OUTPUT_RESHAPE, layer_id):
+            output[token_offset: token_offset + decode_batch_size].copy_(
+                decode_output.reshape(-1, self.num_q_heads * self.head_dim)
+            )
+
+        return output
+

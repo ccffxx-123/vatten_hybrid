@@ -27,12 +27,6 @@ class BaseAttentionWrapper(ABC):
         self.block_size = block_size
         self._timers = {}
 
-    """
-    For a given model, all layers same the same AttentionWrapper instance.
-    However, we cannot have a single timer for all layers because the same timer cannot be turned on/off dynamically.
-    So, we have timers for each layer separately.
-    """
-
     def get_timer(self, operation: OperationMetrics, layer_id: Optional[int] = None):
         if self._timers.get((operation, layer_id)) is None:
             self._timers[(operation, layer_id)] = CudaTimer(operation, layer_id)
@@ -64,8 +58,10 @@ class BaseAttentionWrapper(ABC):
         kv_cache: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
         softmax_scale: float = 1.0,
         layer_id: Optional[int] = None,
-        # 新增参数
         attention_type: str = "full_attention",
         sliding_window: Optional[int] = None,
+        # 混合模型：指定从哪个 KVCacheGroup 读取 block table
+        # 默认 0，纯 vLLM 路径完全兼容（该参数被忽略）
+        group_idx: int = 0,
     ) -> torch.Tensor:
         pass

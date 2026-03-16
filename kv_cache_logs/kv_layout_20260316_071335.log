@@ -1,86 +1,86 @@
-05:30:42 [INFO] KV Cache 日志初始化，路径: ./kv_cache_logs/kv_layout_20260316_053042.log
-05:30:42 [INFO] 
+07:13:35 [INFO] KV Cache 日志初始化，路径: ./kv_cache_logs/kv_layout_20260316_071335.log
+07:13:35 [INFO] 
 ============================================================
 [KVCacheConfigBuilder] 模型层分析:
   总层数: 28
   层类型分布: {'state': 24, 'trans': 4}
   层序列 (前20): ['state', 'state', 'state', 'state', 'trans', 'state', 'state', 'state', 'state', 'state', 'trans', 'state', 'state', 'state', 'state', 'state', 'trans', 'state', 'state', 'state']...
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] 
+07:13:35 [INFO] 
 [KVCacheConfigBuilder] block_size 确定:
-  原始 block_size (from cache_config): 256
-  调整后 block_size: 1280
+  原始 block_size (from cache_config): 16
+  调整后 block_size: 1054
   ⚠ Case4: Mamba state_size 大于 Attention page，已放大 block_size
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 1054 × 4 × 128 × 2
+  结果: 2158592 bytes = 2108.00 KB
+07:13:35 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 1054 × 4 × 128 × 2
+  结果: 2158592 bytes = 2108.00 KB
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [FullAttentionSpec] page_size_bytes 计算:
-  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
-  代入: 2 × 1280 × 4 × 128 × 2
-  结果: 2621440 bytes = 2560.00 KB
-05:30:42 [INFO] [FullAttentionSpec] page_size_bytes 计算:
-  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
-  代入: 2 × 1280 × 4 × 128 × 2
-  结果: 2621440 bytes = 2560.00 KB
-05:30:42 [INFO] 
+07:13:35 [INFO] 
 [KVCacheConfigBuilder] KVCacheSpec 汇总:
-  [state] MambaSpec:
-    block_size     = 1280
-    shapes         = ((10240, 3), (128, 64, 128))
-    dtypes         = (torch.bfloat16, torch.bfloat16)
-    page_size      = 2158592 bytes = 2108.00 KB
   [trans] FullAttentionSpec:
-    block_size     = 1280
+    block_size     = 1054
     num_kv_heads   = 4
     head_size      = 128
     dtype          = torch.bfloat16
-    page_size      = 2621440 bytes = 2560.00 KB
-05:30:42 [INFO] 
+    page_size      = 2158592 bytes = 2108.00 KB
+  [state] MambaSpec:
+    block_size     = 1054
+    shapes         = ((10240, 3), (128, 64, 128))
+    dtypes         = (torch.bfloat16, torch.bfloat16)
+    page_size      = 2158592 bytes = 2108.00 KB
+07:13:35 [INFO] 
 [KVCacheConfigBuilder] 分组算法 (对应 PDF Case2/3):
-  各类型层数: {'state': 24, 'trans': 4}
-  group_size = min([24, 4]) = 4
-05:30:42 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  各类型层数: {'trans': 4, 'state': 24}
+  group_size = min([4, 24]) = 4
+07:13:35 [INFO] [FullAttentionSpec] page_size_bytes 计算:
   公式: 2 × block_size × num_kv_heads × head_size × dtype_size
-  代入: 2 × 1280 × 4 × 128 × 2
-  结果: 2621440 bytes = 2560.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+  代入: 2 × 1054 × 4 × 128 × 2
+  结果: 2158592 bytes = 2108.00 KB
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] [MambaSpec] page_size_bytes 计算:
+07:13:35 [INFO] [MambaSpec] page_size_bytes 计算:
   state[0]: shape=(10240, 3), dtype=torch.bfloat16, prod=30720, dtype_size=2, bytes=61440
   state[1]: shape=(128, 64, 128), dtype=torch.bfloat16, prod=1048576, dtype_size=2, bytes=2097152
   结果: 2158592 bytes = 2108.00 KB
-05:30:42 [INFO] 
+07:13:35 [INFO] 
 [KVCacheConfigBuilder] 最终 KVCacheGroup 划分:
   group[0] (FullAttentionSpec):
     层数: 4 (真实=4, padding=0)
     真实层: ['model.layers.4.self_attn', 'model.layers.10.self_attn', 'model.layers.16.self_attn', 'model.layers.22.self_attn']
-    page_size: 2621440 bytes
+    page_size: 2158592 bytes
   group[1] (MambaSpec):
     层数: 4 (真实=4, padding=0)
     真实层: ['model.layers.0.mamba', 'model.layers.1.mamba', 'model.layers.2.mamba', 'model.layers.3.mamba']
@@ -108,5 +108,5 @@
 
   总 group 数: 7
   总 padding 槽: 0
-  num_blocks: 1356
+  num_blocks: 1616
 ============================================================

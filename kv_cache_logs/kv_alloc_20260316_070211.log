@@ -1,0 +1,535 @@
+07:02:11 [INFO] KV Cache 日志初始化，路径: ./kv_cache_logs/kv_alloc_20260316_070211.log
+07:02:12 [INFO] 
+============================================================
+[BlockSpaceManager] allocate: seq=0, seq.get_len()=6, free_blocks=1355
+07:02:12 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=6
+07:02:12 [INFO]   [FullAttentionManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1355], all_ids=[1355]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1354], all_ids=[1354]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1353], all_ids=[1353]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1352], all_ids=[1352]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1351], all_ids=[1351]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1350], all_ids=[1350]
+07:02:12 [INFO]   [MambaManager] req=0: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1349], all_ids=[1349]
+07:02:12 [DEBUG] [Coordinator] get_block_tables: req=0 → [[1355], [1354], [1353], [1352], [1351], [1350], [1349]]
+07:02:12 [INFO] 
+============================================================
+[BlockSpaceManager] allocate: seq=1, seq.get_len()=8, free_blocks=1348
+07:02:12 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=8
+07:02:12 [INFO]   [FullAttentionManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1348], all_ids=[1348]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1347], all_ids=[1347]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1346], all_ids=[1346]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1345], all_ids=[1345]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1344], all_ids=[1344]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1343], all_ids=[1343]
+07:02:12 [INFO]   [MambaManager] req=1: num_tokens=8, block_size=1280, num_required=1, num_new=1, new_ids=[1342], all_ids=[1342]
+07:02:12 [DEBUG] [Coordinator] get_block_tables: req=1 → [[1348], [1347], [1346], [1345], [1344], [1343], [1342]]
+07:02:12 [INFO] 
+============================================================
+[BlockSpaceManager] allocate: seq=2, seq.get_len()=6, free_blocks=1341
+07:02:12 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=6
+07:02:12 [INFO]   [FullAttentionManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1341], all_ids=[1341]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1340], all_ids=[1340]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1339], all_ids=[1339]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1338], all_ids=[1338]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1337], all_ids=[1337]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1336], all_ids=[1336]
+07:02:12 [INFO]   [MambaManager] req=2: num_tokens=6, block_size=1280, num_required=1, num_new=1, new_ids=[1335], all_ids=[1335]
+07:02:12 [DEBUG] [Coordinator] get_block_tables: req=2 → [[1341], [1340], [1339], [1338], [1337], [1336], [1335]]
+07:02:12 [INFO] 
+============================================================
+[BlockSpaceManager] allocate: seq=3, seq.get_len()=7, free_blocks=1334
+07:02:12 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=7
+07:02:12 [INFO]   [FullAttentionManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1334], all_ids=[1334]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1333], all_ids=[1333]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1332], all_ids=[1332]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1331], all_ids=[1331]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1330], all_ids=[1330]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1329], all_ids=[1329]
+07:02:12 [INFO]   [MambaManager] req=3: num_tokens=7, block_size=1280, num_required=1, num_new=1, new_ids=[1328], all_ids=[1328]
+07:02:12 [DEBUG] [Coordinator] get_block_tables: req=3 → [[1334], [1333], [1332], [1331], [1330], [1329], [1328]]
+07:02:12 [INFO] 
+============================================================
+[BlockSpaceManager] allocate: seq=4, seq.get_len()=5, free_blocks=1327
+07:02:12 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=5
+07:02:12 [INFO]   [FullAttentionManager] req=4: num_tokens=5, block_size=1280, num_required=1, num_new=1, new_ids=[1327], all_ids=[1327]
+07:02:12 [INFO]   [MambaManager] req=4: num_tokens=5, block_size=1280, num_required=1, num_new=1, new_ids=[1326], all_ids=[1326]
+07:02:12 [INFO]   [MambaManager] req=4: num_tokens=5, block_size=1280, num_required=1, num_new=1, new_ids=[1325], all_ids=[1325]
+07:02:12 [INFO]   [MambaManager] req=4: num_tokens=507:02:26 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=6, free_blocks=1320
+07:02:26 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=5
+07:02:26 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=6
+07:02:26 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=8, free_blocks=1320
+07:02:26 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=7
+07:02:26 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=8
+07:02:26 [INFO] 
+=07:02:26 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=6, free_blocks=1320
+07:02:26 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=5
+07:02:26 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=6
+07:02:26 [DEBUG] [Coordinator] get_block_tables: req=0 → [[1355], [1354], [1353], [1352], [1351], [1350], [1349]]
+07:02:26 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=8, free_blocks=1320
+07:02:26 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=7
+07:02:26 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=8
+07:02:26 [DEBUG] [Coordinator] get_block_tables: req=1 → [[1348], [1347], [1346], [1345], [1344], [1343], [1342]]
+07:02:26 [INFO] 
+==============07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=7, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=6
+07:02:28 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=7
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=9, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=8
+07:02:28 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=9
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=7, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=6
+07:02:28 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=7
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=8, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=7
+07:02:28 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=8
+07:02:28 [INFO] 
+===================07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=7, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=6
+07:02:28 [INFO] 
+[Coordin07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=8, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=7
+07:02:28 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=8
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=10, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=9
+07:02:28 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=10
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=8, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=7
+07:02:28 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=8
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=9, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=8
+07:02:28 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=9
+07:02:28 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=7, free_blocks=1320
+07:02:28 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=6
+07:02:28 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=7
+07:02:29 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=9, free_blocks=1320
+07:02:29 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=8
+07:02:29 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=9
+07:02:29 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=11, free_blocks=1320
+07:02:29 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=10
+07:02:29 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=11
+07:02:29 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=9, free_blocks=1320
+07:02:29 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=8
+07:02:29 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=9
+07:02:29 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=10, free_blocks=1320
+07:02:29 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=9
+07:02:29 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=10
+07:02:29 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=8, free_blocks=1320
+07:02:29 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=7
+07:02:29 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=8
+07:02:30 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=10, free_blocks=1320
+07:02:30 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=9
+07:02:30 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=10
+07:02:30 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=12, free_blocks=1320
+07:02:30 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=11
+07:02:30 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=12
+07:02:30 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=10, free_blocks=1320
+07:02:30 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=9
+07:02:30 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=10
+07:02:30 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=11, free_blocks=1320
+07:02:30 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=10
+07:02:30 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=11
+07:02:30 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=9, free_blocks=1320
+07:02:30 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=8
+07:02:30 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=9
+07:02:31 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=11, free_blocks=1320
+07:02:31 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=10
+07:02:31 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=11
+07:02:31 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=13, free_blocks=1320
+07:02:31 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=12
+07:02:31 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=13
+07:02:31 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=11, free_blocks=1320
+07:02:31 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=10
+07:02:31 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=11
+07:02:31 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=12, free_blocks=1320
+07:02:31 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=11
+07:02:31 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=12
+07:02:31 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=10, free_blocks=1320
+07:02:31 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=9
+07:02:31 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=10
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=12, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=11
+07:02:32 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=12
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=14, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=13
+07:02:32 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=14
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=12, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=11
+07:02:32 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=12
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=13, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=12
+07:02:32 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=13
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=11, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=10
+07:02:32 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=11
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=13, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=12
+07:02:32 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=13
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=15, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=14
+07:02:32 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=15
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=13, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=12
+07:02:32 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=13
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=14, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=13
+07:02:32 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=14
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=12, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=11
+07:02:32 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=12
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=14, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=13
+07:02:33 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=14
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=16, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=15
+07:02:33 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=16
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=14, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=13
+07:02:33 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=14
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=15, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=14
+07:02:33 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=15
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=13, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=12
+07:02:33 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=13
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=15, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=14
+07:02:34 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=15
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=17, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=16
+07:02:34 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=17
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=15, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=14
+07:02:34 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=15
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=16, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=15
+07:02:34 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=16
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=14, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=13
+07:02:34 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=14
+=========================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=11, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=10
+07:02:32 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=11
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=4 → [[1327], [1326], [1325], [1324], [1323], [1322], [1321]]
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=13, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=12
+07:02:32 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=13
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=0 → [[1355], [1354], [1353], [1352], [1351], [1350], [1349]]
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=15, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=14
+07:02:32 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=15
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=1 → [[1348], [1347], [1346], [1345], [1344], [1343], [1342]]
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=13, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=12
+07:02:32 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=13
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=2 → [[1341], [1340], [1339], [1338], [1337], [1336], [1335]]
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=14, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=13
+07:02:32 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=14
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=3 → [[1334], [1333], [1332], [1331], [1330], [1329], [1328]]
+07:02:32 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=12, free_blocks=1320
+07:02:32 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=11
+07:02:32 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=12
+07:02:32 [DEBUG] [Coordinator] get_block_tables: req=4 → [[1327], [1326], [1325], [1324], [1323], [1322], [1321]]
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=14, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=13
+07:02:33 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=14
+07:02:33 [DEBUG] [Coordinator] get_block_tables: req=0 → [[1355], [1354], [1353], [1352], [1351], [1350], [1349]]
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=16, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=15
+07:02:33 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=16
+07:02:33 [DEBUG] [Coordinator] get_block_tables: req=1 → [[1348], [1347], [1346], [1345], [1344], [1343], [1342]]
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=14, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=13
+07:02:33 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=14
+07:02:33 [DEBUG] [Coordinator] get_block_tables: req=2 → [[1341], [1340], [1339], [1338], [1337], [1336], [1335]]
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=15, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=14
+07:02:33 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=15
+07:02:33 [DEBUG] [Coordinator] get_block_tables: req=3 → [[1334], [1333], [1332], [1331], [1330], [1329], [1328]]
+07:02:33 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=13, free_blocks=1320
+07:02:33 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=12
+07:02:33 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=13
+07:02:33 [DEBUG] [Coordinator] get_block_tables: req=4 → [[1327], [1326], [1325], [1324], [1323], [1322], [1321]]
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=0, total_tokens=15, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=0, num_computed=14
+07:02:34 [INFO] 
+[Coordinator] allocate: req=0, num_tokens=15
+07:02:34 [DEBUG] [Coordinator] get_block_tables: req=0 → [[1355], [1354], [1353], [1352], [1351], [1350], [1349]]
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=1, total_tokens=17, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=1, num_computed=16
+07:02:34 [INFO] 
+[Coordinator] allocate: req=1, num_tokens=17
+07:02:34 [DEBUG] [Coordinator] get_block_tables: req=1 → [[1348], [1347], [1346], [1345], [1344], [1343], [1342]]
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=2, total_tokens=15, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=2, num_computed=14
+07:02:34 [INFO] 
+[Coordinator] allocate: req=2, num_tokens=15
+07:02:34 [DEBUG] [Coordinator] get_block_tables: req=2 → [[1341], [1340], [1339], [1338], [1337], [1336], [1335]]
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=3, total_tokens=16, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=3, num_computed=15
+07:02:34 [INFO] 
+[Coordinator] allocate: req=3, num_tokens=16
+07:02:34 [DEBUG] [Coordinator] get_block_tables: req=3 → [[1334], [1333], [1332], [1331], [1330], [1329], [1328]]
+07:02:34 [INFO] 
+============================================================
+[BlockSpaceManager] append_slot: seq=4, total_tokens=14, free_blocks=1320
+07:02:34 [INFO] 
+[Coordinator] remove_skipped: req=4, num_computed=13
+07:02:34 [INFO] 
+[Coordinator] allocate: req=4, num_tokens=14
+07:02:34 [DEBUG] [Coordinator] get_block_tables: req=4 → [[1327], [1326], [1325], [1324], [1323], [1322], [1321]]

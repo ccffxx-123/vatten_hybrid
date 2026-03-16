@@ -1,0 +1,141 @@
+06:59:12 [INFO] KV Cache 日志初始化，路径: ./kv_cache_logs/kv_pool_20260316_065912.log
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95722], 剩余 free=95721
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95721], 剩余 free=95720
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95720], 剩余 free=95719
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95719], 剩余 free=95718
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95718], 剩余 free=95717
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95717], 剩余 free=95716
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95716], 剩余 free=95715
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95715], 剩余 free=95714
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95714], 剩余 free=95713
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95713], 剩余 free=95712
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95712], 剩余 free=95711
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95711], 剩余 free=95710
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95710], 剩余 free=95709
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95709], 剩余 free=95708
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95708], 剩余 free=95707
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95707], 剩余 free=95706
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95706], 剩余 free=95705
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95705], 剩余 free=95704
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95704], 剩余 free=95703
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95703], 剩余 free=95702
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95702], 剩余 free=95701
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95701], 剩余 free=95700
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95700], 剩余 free=95699
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95699], 剩余 free=95698
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95698], 剩余 free=95697
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95697], 剩余 free=95696
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95696], 剩余 free=95695
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95695], 剩余 free=95694
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95694], 剩余 free=95693
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95693], 剩余 free=95692
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95692], 剩余 free=95691
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95691], 剩余 free=95690
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95690], 剩余 free=95689
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95689], 剩余 free=95688
+06:59:13 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95688], 剩余 free=95687
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95687], 剩余 free=95686
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95686], 剩余 free=95685
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95685], 剩余 free=95684
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95684], 剩余 free=95683
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95683], 剩余 free=95682
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95682], 剩余 free=95681
+06:59:22 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95681], 剩余 free=95680
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95680], 剩余 free=95679
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95679], 剩余 free=95678
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95678], 剩余 free=95677
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95677], 剩余 free=95676
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95676], 剩余 free=95675
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95675], 剩余 free=95674
+06:59:23 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95674], 剩余 free=95673
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95673], 剩余 free=95672
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95672], 剩余 free=95671
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95671], 剩余 free=95670
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95670], 剩余 free=95669
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95669], 剩余 free=95668
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95668], 剩余 free=95667
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95667], 剩余 free=95666
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95666], 剩余 free=95665
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95665], 剩余 free=95664
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95664], 剩余 free=95663
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95663], 剩余 free=95662
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95662], 剩余 free=95661
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95661], 剩余 free=95660
+06:59:24 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95660], 剩余 free=95659
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95659], 剩余 free=95658
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95658], 剩余 free=95657
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95657], 剩余 free=95656
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95656], 剩余 free=95655
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95655], 剩余 free=95654
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95654], 剩余 free=95653
+06:59:25 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95653], 剩余 free=95652
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95652], 剩余 free=95651
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95651], 剩余 free=95650
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95650], 剩余 free=95649
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95649], 剩余 free=95648
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95648], 剩余 free=95647
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95647], 剩余 free=95646
+06:59:37 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95646], 剩余 free=95645
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95645], 剩余 free=95644
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95644], 剩余 free=95643
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95643], 剩余 free=95642
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95642], 剩余 free=95641
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95641], 剩余 free=95640
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95640], 剩余 free=95639
+06:59:38 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95639], 剩余 free=95638
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95638], 剩余 free=95637
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95637], 剩余 free=95636
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95636], 剩余 free=95635
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95635], 剩余 free=95634
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95634], 剩余 free=95633
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95633], 剩余 free=95632
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95632], 剩余 free=95631
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95631], 剩余 free=95630
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95630], 剩余 free=95629
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95629], 剩余 free=95628
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95628], 剩余 free=95627
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95627], 剩余 free=95626
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95626], 剩余 free=95625
+06:59:39 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95625], 剩余 free=95624
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95624], 剩余 free=95623
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95623], 剩余 free=95622
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95622], 剩余 free=95621
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95621], 剩余 free=95620
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95620], 剩余 free=95619
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95619], 剩余 free=95618
+06:59:40 [INFO] [BlockPool] get_new_blocks: 申请 1 个 → ids=[95618], 剩余 free=95617
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95638, 95673, 95722], 剩余 free=95620
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95637, 95672, 95721], 剩余 free=95623
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95636, 95671, 95720], 剩余 free=95626
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95635, 95670, 95719], 剩余 free=95629
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95634, 95669, 95718], 剩余 free=95632
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95633, 95668, 95717], 剩余 free=95635
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95632, 95667, 95716], 剩余 free=95638
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95652, 95687, 95715], 剩余 free=95641
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95651, 95686, 95714], 剩余 free=95644
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95650, 95685, 95713], 剩余 free=95647
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95649, 95684, 95712], 剩余 free=95650
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95648, 95683, 95711], 剩余 free=95653
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95647, 95682, 95710], 剩余 free=95656
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95646, 95681, 95709], 剩余 free=95659
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95631, 95666, 95708], 剩余 free=95662
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95630, 95665, 95707], 剩余 free=95665
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95629, 95664, 95706], 剩余 free=95668
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95628, 95663, 95705], 剩余 free=95671
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95627, 95662, 95704], 剩余 free=95674
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95626, 95661, 95703], 剩余 free=95677
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95625, 95660, 95702], 剩余 free=95680
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95645, 95680, 95701], 剩余 free=95683
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95644, 95679, 95700], 剩余 free=95686
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95643, 95678, 95699], 剩余 free=95689
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95642, 95677, 95698], 剩余 free=95692
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95641, 95676, 95697], 剩余 free=95695
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95640, 95675, 95696], 剩余 free=95698
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95639, 95674, 95695], 剩余 free=95701
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95624, 95659, 95694], 剩余 free=95704
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95623, 95658, 95693], 剩余 free=95707
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95622, 95657, 95692], 剩余 free=95710
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95621, 95656, 95691], 剩余 free=95713
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95620, 95655, 95690], 剩余 free=95716
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95619, 95654, 95689], 剩余 free=95719
+06:59:41 [INFO] [BlockPool] free_blocks: 归还 ids=[95618, 95653, 95688], 剩余 free=95722

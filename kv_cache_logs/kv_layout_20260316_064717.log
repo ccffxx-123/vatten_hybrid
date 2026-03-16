@@ -1,0 +1,118 @@
+06:47:17 [INFO] KV Cache 日志初始化，路径: ./kv_cache_logs/kv_layout_20260316_064717.log
+06:47:17 [INFO] 
+============================================================
+[KVCacheConfigBuilder] 模型层分析:
+  总层数: 34
+  层类型分布: {'swa': 29, 'trans': 5}
+  层序列 (前20): ['swa', 'swa', 'swa', 'swa', 'swa', 'trans', 'swa', 'swa', 'swa', 'swa', 'swa', 'trans', 'swa', 'swa', 'swa', 'swa', 'swa', 'trans', 'swa', 'swa']...
+06:47:17 [INFO] 
+[KVCacheConfigBuilder] block_size 确定:
+  原始 block_size (from cache_config): 256
+  调整后 block_size: 256
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] 
+[KVCacheConfigBuilder] KVCacheSpec 汇总:
+  [swa] SlidingWindowSpec:
+    block_size     = 256
+    num_kv_heads   = 2
+    head_size      = 256
+    dtype          = torch.bfloat16
+    sliding_window = 1024
+    page_size      = 524288 bytes = 512.00 KB
+  [trans] FullAttentionSpec:
+    block_size     = 256
+    num_kv_heads   = 2
+    head_size      = 256
+    dtype          = torch.bfloat16
+    page_size      = 524288 bytes = 512.00 KB
+06:47:17 [INFO] 
+[KVCacheConfigBuilder] 分组算法 (对应 PDF Case2/3):
+  各类型层数: {'swa': 29, 'trans': 5}
+  group_size = min([29, 5]) = 5
+06:47:17 [INFO] [FullAttentionSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] [SlidingWindowSpec] page_size_bytes 计算:
+  公式: 2 × block_size × num_kv_heads × head_size × dtype_size
+  代入: 2 × 256 × 2 × 256 × 2
+  sliding_window: 1024
+  结果: 524288 bytes = 512.00 KB
+06:47:17 [INFO] 
+[KVCacheConfigBuilder] 最终 KVCacheGroup 划分:
+  group[0] (FullAttentionSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.5.self_attn', 'model.layers.11.self_attn', 'model.layers.17.self_attn', 'model.layers.23.self_attn', 'model.layers.29.self_attn']
+    page_size: 524288 bytes
+  group[1] (SlidingWindowSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.0.self_attn', 'model.layers.1.self_attn', 'model.layers.2.self_attn', 'model.layers.3.self_attn', 'model.layers.4.self_attn']
+    page_size: 524288 bytes
+  group[2] (SlidingWindowSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.6.self_attn', 'model.layers.7.self_attn', 'model.layers.8.self_attn', 'model.layers.9.self_attn', 'model.layers.10.self_attn']
+    page_size: 524288 bytes
+  group[3] (SlidingWindowSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.12.self_attn', 'model.layers.13.self_attn', 'model.layers.14.self_attn', 'model.layers.15.self_attn', 'model.layers.16.self_attn']
+    page_size: 524288 bytes
+  group[4] (SlidingWindowSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.18.self_attn', 'model.layers.19.self_attn', 'model.layers.20.self_attn', 'model.layers.21.self_attn', 'model.layers.22.self_attn']
+    page_size: 524288 bytes
+  group[5] (SlidingWindowSpec):
+    层数: 5 (真实=5, padding=0)
+    真实层: ['model.layers.24.self_attn', 'model.layers.25.self_attn', 'model.layers.26.self_attn', 'model.layers.27.self_attn', 'model.layers.28.self_attn']
+    page_size: 524288 bytes
+  group[6] (SlidingWindowSpec):
+    层数: 5 (真实=4, padding=1)
+    真实层: ['model.layers.30.self_attn', 'model.layers.31.self_attn', 'model.layers.32.self_attn', 'model.layers.33.self_attn']
+    padding: ['padding.0']
+    page_size: 524288 bytes
+
+  总 group 数: 7
+  总 padding 槽: 1
+  num_blocks: 5982
+============================================================

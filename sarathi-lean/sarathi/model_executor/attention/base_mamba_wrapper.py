@@ -131,6 +131,7 @@ class BaseMambaWrapper(ABC):
             # block_tables[mamba_group_idx] 是 Mamba group 的 block_id 列表
             # block_id = 0 是 null_block（MambaManager 会把窗口外的全部替换为 null）
             mamba_table = seq_meta.block_tables[self.mamba_group_idx]
+            print(f"DEBUG: mamba_table: {mamba_table}, mamba_group_idx: {self.mamba_group_idx}")
             valid_ids   = [bid for bid in mamba_table if bid != 0]
             state_block_id = valid_ids[-1] if valid_ids else 0
 

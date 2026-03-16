@@ -20,10 +20,10 @@ model_attention_backend: fi_paged
 model_block_size: 16
 model_load_format: dummy
 model_max_model_len: 4096
-model_name: meta-llama/Meta-Llama-3-8B
+model_name: google/gemma-3-27b-it
 model_pipeline_parallel_degree: 1
-model_tensor_parallel_degree: 1
-output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_50_8192_4/model_llama-3-8b_tp_1_attn_fi_paged_16_cl_4096_pd_4_reqs_50//
+model_tensor_parallel_degree: 2
+output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_50_8192_4/model_gemma-3-27b_tp_2_attn_fi_paged_16_cl_4096_pd_1_reqs_50//
 poisson_request_interval_generator_qps: 1.0
 port: 8000
 replica_resource_mapping: ''
@@ -59,7 +59,7 @@ trace_request_length_generator_prefill_scale_factor: 1
 trace_request_length_generator_trace_file: ./data/processed_traces/arxiv_summarization_filtered_stats_llama2_tokenizer.csv
 uniform_request_length_generator_max_tokens: 4096
 uniform_request_length_generator_min_tokens: 4096
-uniform_request_length_generator_prefill_to_decode_ratio: 4.0
+uniform_request_length_generator_prefill_to_decode_ratio: 1.0
 vllm_scheduler_max_tokens_in_batch: 4096
 write_chrome_trace: true
 write_json_trace: true

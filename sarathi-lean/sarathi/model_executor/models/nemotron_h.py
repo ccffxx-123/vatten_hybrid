@@ -248,6 +248,12 @@ class NemotronHMamba2Layer(nn.Module):
     def __init__(self, config, layer_id: Optional[int] = None) -> None:
         super().__init__()
         self.layer_id = layer_id
+
+        # group_idx 由外部（NemotronHModel.set_mamba_group_indices）在模型初始化后注入。
+        # 表示本层应从 seq_metadata.block_tables[group_idx] 读取 block_table。
+        # 初始值设为 None，forward 中会检查是否已设置。
+        self.group_idx: Optional[int] = None
+
         self.hidden_size = config.hidden_size
         self.num_heads = config.mamba_num_heads        # 128
         self.head_dim = config.mamba_head_dim           # 64
@@ -306,6 +312,35 @@ class NemotronHMamba2Layer(nn.Module):
         except ImportError:
             pass
 
+    def _get_block_id_for_seq(
+        self,
+        seq_meta: "SequenceMetadata",
+    ) -> int:
+        """
+        从本层对应 group 的 block_table 中找到最后一个有效 block_id。
+ 
+        MambaManager 会把窗口外（即除最后一个 token 状态之外）的 block
+        替换为 null_block（block_id=0），因此有效 block 就是最后一个非 0 的 id。
+ 
+        返回 0 表示"无有效 block"（profiling 阶段 / 尚未分配），
+        调用方收到 0 后应跳过 cache 读写（null_block 保护）。
+        """
+        # profiling 阶段：block_tables 尚未初始化
+        if seq_meta.block_tables is None:
+            return 0
+ 
+        assert self.group_idx is not None, (
+            f"NemotronHMamba2Layer(layer_id={self.layer_id}) 的 group_idx 未设置，"
+            f"请确认 NemotronHModel.set_mamba_group_indices() 已被调用。"
+        )
+ 
+        if self.group_idx >= len(seq_meta.block_tables):
+            return 0
+ 
+        mamba_table = seq_meta.block_tables[self.group_idx]
+        valid_ids = [bid for bid in mamba_table if bid != 0]
+        return valid_ids[-1] if valid_ids else 0
+
     def _init_norm(self, config):
         try:
             from mamba_ssm.ops.triton.layernorm_gated import rmsnorm_fn
@@ -351,15 +386,19 @@ class NemotronHMamba2Layer(nn.Module):
         """
         assert input_metadata is not None, "Mamba-2 混合批处理必须传入 input_metadata 才能进行序列切分"
 
-        if kv_cache is None:
-            print("DEBUG: Layer Type: Mamba, kv_cache is None (Profiling phase)")
-        else:
-            # 假设 kv_cache 是一个包含两个 Tensor 的元组
-            state1, state2 = kv_cache
-            print(f"DEBUG: Layer Type: Mamba, "
-                f"State1 Shape: {state1.shape}, State1 Stride: {state1.stride()}, "
-                f"State2 Shape: {state2.shape}, State2 Stride: {state2.stride()}")
+        # if kv_cache is None:
+        #     print("DEBUG: Layer Type: Mamba, kv_cache is None (Profiling phase)")
+        # else:
+        #     # # 假设 kv_cache 是一个包含两个 Tensor 的元组
+        #     # print(f"DEBUG: Layer Type: Mamba, "
+        #     # print(f"DEBUG: type is {type(kv_cache)}")
+        #     # print(f"DEBUG: shape is {kv_cache.shape}")
+        #     state1, state2 = kv_cache
+        #     print(f"DEBUG: Layer Type: Mamba, "
+        #         f"State1 Shape: {state1.shape}, State1 Stride: {state1.stride()}, "
+        #         f"State2 Shape: {state2.shape}, State2 Stride: {state2.stride()}")
         
+        # group_idx = self.group_idx  # 每层自己知道用哪个group
         dtype = hidden_states.dtype
         # 🌟 核心修复：创建一个和输入尺寸（例如 8）完全一致的全零张量，天然处理掉 Padding 问题
         outputs = torch.zeros_like(hidden_states)
@@ -367,13 +406,19 @@ class NemotronHMamba2Layer(nn.Module):
         A = -torch.exp(self.A_log.float())
         groups_time_state_size = self.n_groups * self.ssm_state_size
 
+        # seq_metadata_list 在 profiling 阶段为 None
+        is_profiling = (input_metadata.seq_metadata_list is None) or (kv_cache is None)
+
         # 遍历当前 Batch 中的每一条序列，针对性地进行 Prefill 或 Decode
-        for is_prefill, seq_len, block_id, token_offset in zip(
+        for i, (is_prefill, seq_len, token_offset) in enumerate(zip(
             input_metadata.seq_is_prefill,
             input_metadata.seq_lens,
-            input_metadata.seq_state_block_ids,
-            input_metadata.seq_token_offsets
-        ):
+            input_metadata.seq_token_offsets,
+        )):
+            # # 每层从自己对应的 group 的 block_table 解析 block_id
+            # seq_meta = input_metadata.seq_metadata_list[i]
+            # block_id = self._get_block_id_for_seq(seq_meta, group_idx)
+
             # 1. 精准切片：提取属于当前序列的 Token
             # x_seq shape: (seq_len, hidden_size)
             x_seq = hidden_states[token_offset : token_offset + seq_len]
@@ -394,6 +439,13 @@ class NemotronHMamba2Layer(nn.Module):
                 [d_mlp, d_mlp, self.intermediate_size, self.conv_dim, self.num_heads],
                 dim=-1,
             )
+
+             # ── 解析 block_id（按本层的 group_idx 查正确的 block_table）──
+            if is_profiling:
+                block_id = 0
+            else:
+                seq_meta = input_metadata.seq_metadata_list[i]
+                block_id = self._get_block_id_for_seq(seq_meta)
 
             # --- 取出当前序列对应的物理 Cache ---
             # block_id = 0 通常是 Null Block，避免对其进行无效读写
@@ -448,11 +500,11 @@ class NemotronHMamba2Layer(nn.Module):
 
                     dt_bias_expanded = self.dt_bias.unsqueeze(1).expand(self.num_heads, self.head_dim).contiguous()
 
-                    # 假设你的状态变量叫 ssm_state
-                    print(f"DEBUG State - Ptr: {hex(ssm_state.data_ptr())}, "
-                        f"Stride: {ssm_state.stride()}, "
-                        f"Mean: {ssm_state.mean().item():.4f}, "
-                        f"Has NaN: {ssm_state.isnan().any().item()}")
+                    # # 假设你的状态变量叫 ssm_state
+                    # print(f"DEBUG State - Ptr: {hex(ssm_state.data_ptr())}, "
+                    #     f"Stride: {ssm_state.stride()}, "
+                    #     f"Mean: {ssm_state.mean().item():.4f}, "
+                    #     f"Has NaN: {ssm_state.isnan().any().item()}")
 
                     # 步骤 B: Selective SSM 单步更新
                     # _selective_state_update 同样会原地修改 ssm_state
@@ -672,6 +724,35 @@ class NemotronHModel(nn.Module):
         if is_pipeline_last_stage():
             self.norm = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
+
+    def set_mamba_group_indices(self, layer_to_group_idx: Dict[int, int]) -> None:
+        """
+        将 ModelRunner 计算好的 global_layer_idx → group_idx 映射
+        注入每个 NemotronHMamba2Layer，使其能在 forward 时查到正确的 block_table。
+ 
+        此方法在 ModelRunner.__init__ 中调用（模型加载完成后、推理开始前）。
+ 
+        Args:
+            layer_to_group_idx: {global_layer_idx: group_idx}，
+                                只包含 "state" 类型层的条目。
+        """
+        for layer in self.layers:
+            if (
+                isinstance(layer, NemotronHBlock)
+                and layer.block_type == "mamba"
+                and isinstance(layer.mixer, NemotronHMamba2Layer)
+            ):
+                global_id = layer.layer_id
+                if global_id in layer_to_group_idx:
+                    layer.mixer.group_idx = layer_to_group_idx[global_id]
+                else:
+                    # 理论上不应该发生：所有 mamba 层都应在映射中
+                    raise ValueError(
+                        f"Mamba 层 global_id={global_id} 不在 layer_to_group_idx 中。"
+                        f"可用的 keys: {sorted(layer_to_group_idx.keys())}"
+                    )
+
+    
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -685,22 +766,24 @@ class NemotronHModel(nn.Module):
 
         # 2. 🛡️ 绝对安全的路由逻辑：按照网络结构精确分发
         # 统计模型中实际需要 Cache 的层数（Mamba + Attention）
-        stateful_count = sum(1 for layer in self.layers if layer.block_type in ["attention", "mamba"])
-        # 统计底层引擎实际传进来的有效 Cache 数量
-        valid_cache_count = sum(1 for c in kv_caches if c is not None)
-
-        is_compact_cache = False
-        if len(kv_caches) == stateful_count:
-            is_compact_cache = True
-        elif valid_cache_count > 0 and valid_cache_count == stateful_count:
-            # 如果 kv_caches 总长度是 52，但是有效的 28 个缓存全被紧凑地塞在了前 28 个位置
-            if all(kv_caches[i] is not None for i in range(stateful_count)):
+        stateful_count = sum(
+            1 for layer in self.layers if layer.block_type in ("attention", "mamba")
+        )
+        is_compact_cache = (len(kv_caches) == stateful_count)
+        if not is_compact_cache:
+            valid_cache_count = sum(1 for c in kv_caches if c is not None)
+            if (
+                valid_cache_count > 0
+                and valid_cache_count == stateful_count
+                and all(kv_caches[i] is not None for i in range(stateful_count))
+            ):
                 is_compact_cache = True
 
         compact_idx = 0
 
         # 3. 逐层前向传播
         for i, layer in enumerate(self.layers):
+            # print(f"DEBUG: layer_id: {layer.layer_id}, block_type: {layer.block_type}, cache: {type(kv_caches[i])}")
             cache = None
             # 只有 Attention 和 Mamba 需要吃 Cache，MLP 直接略过
             if layer.block_type in ["attention", "mamba"]:
@@ -730,6 +813,7 @@ class NemotronHModel(nn.Module):
         return hidden_states
 
 
+
 class NemotronHForCausalLM(nn.Module):
     """Nemotron-H model for causal language modeling."""
 
@@ -754,6 +838,11 @@ class NemotronHForCausalLM(nn.Module):
                 gather_output=False,
                 perform_initialization=False,
             )
+
+
+    def set_mamba_group_indices(self, layer_to_group_idx: Dict[int, int]) -> None:
+        """透传给内部 NemotronHModel。ModelRunner 调用顶层模型即可。"""
+        self.model.set_mamba_group_indices(layer_to_group_idx)
 
     def forward(
         self,

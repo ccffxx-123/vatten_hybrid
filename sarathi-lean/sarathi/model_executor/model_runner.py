@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import torch
 import torch.distributed
@@ -27,6 +27,91 @@ from sarathi.model_executor.attention import get_mamba_wrapper
 from sarathi.model_executor.attention import AttentionBackend
 from sarathi.core.datatypes.mamba_metadata import MambaInputMetadata
 logger = init_logger(__name__)
+
+
+def _build_layer_to_group_idx(model_config: ModelConfig) -> Dict[int, int]:
+    """
+    从 ModelConfig 推导每个 Mamba 层（全局真实 layer_id）对应的 group_idx。
+ 
+    关键点
+    ------
+    model_config.get_layer_type_list() 会过滤掉 "mlp" 类型层并重新编号，
+    返回的索引与模型中真实的 global_layer_id（含 mlp 层）不一致。
+ 
+    例：layers_block_type = ["mamba","mlp","mamba","mlp","mamba",...]
+      get_layer_type_list() 返回 ["state","state","state",...]，索引 0,1,2,...
+      但真实 global_layer_id 是 0,2,4,...
+ 
+    因此本函数直接读取 hf_config.layers_block_type（原始完整列表），
+    用真实全局 layer_id 构建映射，与 NemotronHBlock.layer_id 保持一致。
+ 
+    分组算法复现 build_kv_cache_config() 的逻辑：
+      _TYPE_ORDER = ("trans", "swa", "state")
+      group_size  = min(各非 mlp 类型的层数)
+      按 _TYPE_ORDER 顺序切块，每块对应一个 group，group 编号全局累加
+ 
+    返回
+    ----
+    Dict[real_global_layer_id -> group_idx]
+        只包含 "state"（mamba）类型层的条目。
+    """
+    _TYPE_ORDER = ("trans", "swa", "state")
+ 
+    # hf_config.layers_block_type 是含 mlp 的原始完整列表
+    # 例：["mamba","mlp","mamba","mlp","mamba","attention","mlp",...]
+    hf_config = model_config.hf_config
+    raw_block_types = getattr(hf_config, "layers_block_type", None)
+ 
+    if raw_block_types is not None:
+        real_ids_with_type = list(enumerate(raw_block_types))
+    else:
+        # fallback：模型不含 mlp 层，get_layer_type_list() 的索引即真实 global_id
+        real_ids_with_type = list(enumerate(model_config.get_layer_type_list()))
+ 
+    # 将 hf_config 的类型名映射到 sarathi 内部类型名
+    _HF_TO_SARATHI = {
+        "mamba":          "state",
+        "ssm":            "state",
+        "recurrent":      "state",
+        "attention":      "trans",
+        "full_attention": "trans",
+        "transformer":    "trans",
+        "sliding_window": "swa",
+        "mlp":            "mlp",   # 不参与分组，跳过
+    }
+ 
+    # 按 sarathi 类型收集真实 global_layer_id（跳过 mlp）
+    layer_ids_by_type: Dict[str, List[int]] = {"trans": [], "swa": [], "state": []}
+    for real_id, raw_type in real_ids_with_type:
+        sarathi_type = _HF_TO_SARATHI.get(raw_type.lower())
+        if sarathi_type is None or sarathi_type == "mlp":
+            continue
+        layer_ids_by_type[sarathi_type].append(real_id)
+ 
+    # 只保留实际存在的类型
+    present_types = {t for t, ids in layer_ids_by_type.items() if ids}
+ 
+    # group_size = min(各存在类型的层数)
+    layer_counts = {t: len(layer_ids_by_type[t]) for t in present_types}
+    group_size = min(layer_counts.values())
+ 
+    # 按 _TYPE_ORDER 切块，累计 group 编号，只记录 "state" 层的映射
+    layer_to_group_idx: Dict[int, int] = {}
+    group_counter = 0
+ 
+    for sarathi_type in _TYPE_ORDER:
+        if sarathi_type not in present_types:
+            continue
+        ids = layer_ids_by_type[sarathi_type]
+        for chunk_start in range(0, len(ids), group_size):
+            chunk = ids[chunk_start: chunk_start + group_size]
+            if sarathi_type == "state":
+                for real_id in chunk:
+                    layer_to_group_idx[real_id] = group_counter
+            group_counter += 1
+ 
+    return layer_to_group_idx
+
 
 USE_UVM = False
 class ModelRunner:
@@ -59,20 +144,21 @@ class ModelRunner:
         )
 
         if self.has_mamba_layers:
-            # 确定 Mamba group 在 block_tables 中的下标
-            # build_kv_cache_config 按 trans → swa → state 顺序排列 group
-            layer_types = model_config.get_layer_type_list()
-            present     = set(layer_types)
-            # state group 排在 trans/swa 之后
-            mamba_group_idx = sum(1 for t in ("trans", "swa") if t in present)
-
-            get_mamba_wrapper().init(
-                model_config    = self.model_config,
-                parallel_config = self.parallel_config,
-                block_size      = cache_config.block_size,
-                device          = self.device,
-                mamba_group_idx = mamba_group_idx,
+            # 构建 global_layer_idx → group_idx 映射
+            layer_to_group_idx = _build_layer_to_group_idx(model_config)
+            logger.info(
+                f"[ModelRunner] Mamba layer → group_idx mapping: {layer_to_group_idx}"
             )
+            # 将映射注入模型中每个 Mamba 层
+            # 模型负责识别自己的层并设置 group_idx（见 NemotronHModel.set_mamba_group_indices）
+            if hasattr(self.model, "set_mamba_group_indices"):
+                self.model.set_mamba_group_indices(layer_to_group_idx)
+            else:
+                logger.warning(
+                    "[ModelRunner] model 没有 set_mamba_group_indices 方法，"
+                    "Mamba 层的 group_idx 未设置，block_table 路由可能错误。"
+                )
+
 
         self.sampler: Optional[Sampler] = None
         if self.model.lm_head:
@@ -141,6 +227,49 @@ class ModelRunner:
 
         return tokens_tensor, positions_tensor
 
+
+    def _build_mamba_metadata(
+        self,
+        seq_metadata_list: List[SequenceMetadata],
+        is_profiling: bool = False,
+    ) -> MambaInputMetadata:
+        """
+        构建 MambaInputMetadata。
+ 
+        is_profiling=True 时：
+          - seq_metadata_list 中的 block_tables 为 None
+          - seq_metadata_list 传 None，层内按 block_tables is None 跳过 cache 读写
+ 
+        is_profiling=False 时：
+          - 传完整 seq_metadata_list，每个 Mamba 层按自己的 group_idx 查 block_tables
+        """
+        seq_is_prefill: List[bool] = []
+        seq_lens: List[int] = []
+        seq_token_offsets: List[int] = []
+        token_offset = 0
+ 
+        for seq_meta in seq_metadata_list:
+            is_prefill = seq_meta.is_prompt
+            if is_prefill:
+                seq_len = seq_meta.seq.get_next_prompt_chunk_len(
+                    seq_meta.prompt_chunk_len
+                )
+            else:
+                seq_len = 1
+ 
+            seq_is_prefill.append(is_prefill)
+            seq_lens.append(seq_len)
+            seq_token_offsets.append(token_offset)
+            token_offset += seq_len
+ 
+        return MambaInputMetadata(
+            seq_is_prefill=seq_is_prefill,
+            seq_lens=seq_lens,
+            seq_token_offsets=seq_token_offsets,
+            seq_metadata_list=None if is_profiling else seq_metadata_list,
+        )
+
+
     @torch.inference_mode()
     def profile_num_available_blocks(
         self,
@@ -192,25 +321,9 @@ class ModelRunner:
         # -------------------- 新增：Mamba Profiling 元数据构造 --------------------
         input_metadata = None
         if self.has_mamba_layers:
-            get_mamba_wrapper().begin_forward(seq_metadata_list)
-            
-            # Profiling 阶段没有 block_tables，Wrapper 内部会提前 return
-            # 我们必须手动伪造一份元数据，强迫 Mamba 层跑一遍 Chunk Scan，精准捕获激活显存
-            seq_is_prefill = [True] * len(seq_metadata_list)
-            seq_lens = [seq_meta.prompt_chunk_len for seq_meta in seq_metadata_list]
-            seq_state_block_ids = [0] * len(seq_metadata_list)  # block_id=0 代表空槽，避免读写 Cache
-            
-            seq_token_offsets = []
-            offset = 0
-            for length in seq_lens:
-                seq_token_offsets.append(offset)
-                offset += length
-                
-            input_metadata = MambaInputMetadata(
-                seq_is_prefill=seq_is_prefill,
-                seq_lens=seq_lens,
-                seq_state_block_ids=seq_state_block_ids,
-                seq_token_offsets=seq_token_offsets,
+            # profiling 阶段：seq_metadata_list=None，层内跳过 cache 读写
+            input_metadata = self._build_mamba_metadata(
+                seq_metadata_list, is_profiling=True
             )
         # -----------------------------------------------------------------------
 
@@ -261,28 +374,8 @@ class ModelRunner:
         num_gpu_blocks = max(num_gpu_blocks, 0)
         torch.cuda.empty_cache()
         get_attention_wrapper().end_forward()
-        # 新增：清理 Mamba 状态
-        if self.has_mamba_layers:
-            get_mamba_wrapper().end_forward()
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, physical_memory
-
-
-        # cache_block_size = get_cache_engine(self.model_config.attention_backend).get_cache_block_size(
-        #     block_size, self.model_config, self.parallel_config
-        # )
-        # num_gpu_blocks = int(
-        #     physical_memory // cache_block_size
-        # )
-        # num_gpu_blocks = max(num_gpu_blocks, 0)
-        # torch.cuda.empty_cache()
-
-        # get_attention_wrapper().end_forward()
-
-        # # Reset the seed to ensure that the random state is not affected by
-        # # the model initialization and profiling.
-        # set_random_seed(self.model_config.seed)
-        # return num_gpu_blocks, physical_memory
         
 
     def run(
@@ -298,19 +391,9 @@ class ModelRunner:
 
         input_metadata = None
         if self.has_mamba_layers:
-            # get_mamba_wrapper().begin_forward(seq_metadata_list)
-            mamba_wrapper = get_mamba_wrapper()
-            mamba_wrapper.begin_forward(seq_metadata_list)
-            
-            # --- 传入每条序列的完整元数据 ---
-            input_metadata = MambaInputMetadata(
-                seq_is_prefill=mamba_wrapper.seq_is_prefill,
-                seq_lens=mamba_wrapper.seq_lens,
-                seq_state_block_ids=mamba_wrapper.seq_state_block_ids,
-                seq_token_offsets=mamba_wrapper.seq_token_offsets,
+            input_metadata = self._build_mamba_metadata(
+                seq_metadata_list, is_profiling=False
             )
-            # print("99999999999999999999999999999999999999999999999999999")
-            # print(input_metadata.seq_is_prefill)
 
         with self._model_execution_e2e_timer:
             # Execute the model.
@@ -339,8 +422,5 @@ class ModelRunner:
                 output = self.sampler(output, seq_metadata_list)
 
         get_attention_wrapper().end_forward()
-
-        if self.has_mamba_layers:
-            get_mamba_wrapper().end_forward()
 
         return output

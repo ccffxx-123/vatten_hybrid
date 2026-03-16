@@ -122,14 +122,6 @@ def _c_contiguous_strides(shape: Tuple[int, ...]) -> Tuple[int, ...]:
         s *= dim
     return tuple(strides)
 
-# def get_per_layer_cache(self, num_layers: int) -> List:
-#     """将 [group_idx][buf_idx] 格式转为 [local_layer_idx] 的平坦列表"""
-#     per_layer = [None] * num_layers
-#     for layer_idx, (group_idx, buf_idx) in self.layer_to_cache_info.items():
-#         # layer_idx 是全局下标，需要转为本 pipeline stage 的局部下标
-#         local_idx = layer_idx % num_layers  # 单 stage 情况
-#         per_layer[local_idx] = self.gpu_cache[group_idx][buf_idx]
-#     return per_layer
 
 
 
@@ -524,6 +516,7 @@ class HybridCacheEngine:
         """
         per_layer: List[Optional[LayerCache]] = [None] * num_layers
         for global_layer_idx, (group_idx, buf_idx) in self.layer_to_cache_info.items():
+            # print(f"global_layer_idx: {global_layer_idx}, group_idx: {group_idx}, buf_idx: {buf_idx}")
             local_idx = global_layer_idx % num_layers
             per_layer[local_idx] = self.gpu_cache[group_idx][buf_idx]
         return per_layer

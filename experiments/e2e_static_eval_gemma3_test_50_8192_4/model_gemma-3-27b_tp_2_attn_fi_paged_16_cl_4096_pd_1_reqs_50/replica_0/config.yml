@@ -1,4 +1,4 @@
-model: meta-llama/Meta-Llama-3-8B
+model: google/gemma-3-27b-it
 replica_id: 0
 replica_resource_mapping:
 - !!python/tuple
@@ -7,7 +7,7 @@ replica_resource_mapping:
 - !!python/tuple
   - ''
   - 1
-tokenizer: meta-llama/Meta-Llama-3-8B
+tokenizer: google/gemma-3-27b-it
 tokenizer_mode: auto
 trust_remote_code: true
 download_dir: null
@@ -15,7 +15,7 @@ load_format: dummy
 dtype: bfloat16
 seed: 42
 pipeline_parallel_size: 1
-tensor_parallel_size: 1
+tensor_parallel_size: 2
 block_size: 16
 gpu_memory_utilization: 0.9
 revision: null
@@ -30,7 +30,7 @@ high_chunk_size: 2048
 chunk_schedule_max_tokens: 131072
 chunk_schedule_stages: 16
 write_metrics: true
-output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_50_8192_4/model_llama-3-8b_tp_1_attn_fi_paged_16_cl_4096_pd_4_reqs_50///replica_0
+output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_50_8192_4/model_gemma-3-27b_tp_2_attn_fi_paged_16_cl_4096_pd_1_reqs_50///replica_0
 wandb_project: ''
 wandb_sweep_id: ''
 wandb_run_id: ''

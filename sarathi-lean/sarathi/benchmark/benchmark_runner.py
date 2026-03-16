@@ -71,7 +71,7 @@ class BenchmarkRunner:
             replica_id=replica_id,
             # replica_resource_mapping=replica_resource_mapping,
             # replica_resource_mapping=[("", 0)],
-            replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
+            replica_resource_mapping=[("", 1), ("", 3)],  # 用 GPU 2 和 GPU 3
             output_dir=output_dir,
             # model config
             model=self._config.model_name,

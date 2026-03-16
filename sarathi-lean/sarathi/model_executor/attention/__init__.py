@@ -7,6 +7,12 @@ from sarathi.model_executor.attention.flashinfer_attention_wrapper import (
 from sarathi.model_executor.attention.vattention_flashinfer_wrapper import (
     VAttentionFlashInferWrapper,
 )
+from sarathi.model_executor.attention.flash_attention_wrapper import (
+    FlashAttentionWrapper,
+)
+from sarathi.model_executor.attention.vattention_flashattention_wrapper import (
+    VAttentionFlashAttentionWrapper,
+)
 
 # FA: FLASHATTENTION
 # FI: FLASHINFER
@@ -122,6 +128,15 @@ def get_attention_wrapper():
         return VAttentionFlashInferWrapper.get_instance()
     elif ATTENTION_BACKEND == AttentionBackend.FI_VATTN_SYNC:
         return VAttentionFlashInferWrapper.get_instance()
+    elif ATTENTION_BACKEND == AttentionBackend.FA_PAGED:
+        return FlashAttentionWrapper.get_instance()  # 返回 FlashAttention 注意力包装器实例
+    elif ATTENTION_BACKEND == AttentionBackend.FA_PAGED_HYBIRD:
+        return FlashAttentionWrapper.get_instance()  # 返回 FlashAttention 注意力包装器实例
+    elif ATTENTION_BACKEND == AttentionBackend.FA_VATTN_MEGACACHE:
+        return VAttentionFlashAttentionWrapper.get_instance()  # 返回 FlashAttention 的 MegaCache VAttention 包装器实例
+    elif ATTENTION_BACKEND == AttentionBackend.FA_VATTN_MEGACACHE_SYNC:
+        return VAttentionFlashAttentionWrapper.get_instance()
+
 
     raise ValueError(f"Unsupported attention backend: {ATTENTION_BACKEND}")
 

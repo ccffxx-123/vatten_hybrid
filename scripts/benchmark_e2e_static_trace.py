@@ -11,8 +11,8 @@ gpu_mem_util = 0.9     # GPU 显存占用率阈值（设为 0.9 表示允许模�
 models = {'gemma-3-27b'}
 
 attention_backends = [
-    'fi_paged_16', 
-    'fi_paged_hybird_16', 
+    # 'fi_paged_16', 
+    # 'fi_paged_hybird_16', 
     'fi_vattn_2mb', 
 ]
 
@@ -20,7 +20,7 @@ attention_backends = [
 context_lengths=[4096]
 # context_lengths=[2048 4096 8192 16384]
 
-pd_ratios = [4, 1]
+pd_ratios = [4]
 # pd_ratios = [500, 100, 50]
 
 src, root, main = utils.get_paths()
@@ -34,9 +34,9 @@ if utils.args.test == True:
     # num_requests, context_lengths, pd_ratios = 100, [131072], [100] #
     models, attention_backends = {'gemma-3-27b'}, ['fi_paged_16']  #  
     num_requests, context_lengths, pd_ratios = 50, [4096], [4] # gemma-3-4b , 16384, 32768, 65536, 131072
-else: #'fa_paged_256', 'fa_paged_hybird_256',   2048,4096,8192,  , 32768, 65536, 131072
-    # 正常模式下加载 utils 中定义的所有待测模型映射 ,  2048,4096,8192, 16384, 32768, 65536, 131072, 196608
-    models = utils.models
+# else: #'fa_paged_256', 'fa_paged_hybird_256',   2048,4096,8192,  , 32768, 65536, 131072
+#     # 正常模式下加载 utils 中定义的所有待测模型映射 ,  2048,4096,8192, 16384, 32768, 65536, 131072, 196608
+#     models = utils.models
 
 torch.cuda.memory._record_memory_history()
 # ================= 3. 自动化实验循环 =================
@@ -49,7 +49,6 @@ for model in models:
                 # --- 动态参数计算 ---
                 model_logentry = utils.models[model]['logentry']  # 获取模型在日志中的标识名
                 tp_dim = utils.models[model]['tp']               # 获取该模型的张量并行度 (Tensor Parallelism)
-
 
                 # 设置最大批处理大小 (Batch Size)
                 # 针对大型模型 (如 Yi-34B) 且请求充足时使用 256，否则默认为 16 以平衡显存压力

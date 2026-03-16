@@ -131,28 +131,6 @@ class BaseWorker:
         )
         logger.info(f"Model initialized on worker {self.rank}.")
 
-    # @torch.inference_mode()
-    # @synchronized
-    # def init_cache_engine(self, cache_config: CacheConfig) -> None:
-    #     torch.cuda.set_device(self.device)
-
-    #     self.cache_config = cache_config
-
-    #     mem_alloc_backend = get_cache_mem_alloc_backend(self.model_config.attention_backend)
-
-    #     self.cache_engine = get_cache_engine(self.model_config.attention_backend)(
-    #         self.cache_config, self.model_config, self.parallel_config, mem_alloc_backend
-    #     )
-    #     self.gpu_cache = self.cache_engine.gpu_cache
-
-    #     self.seq_manager = WorkerSequenceManager(
-    #         self.cache_config,
-    #         self.scheduler_config,
-    #         self.model_config,
-    #         self.parallel_config,
-    #     )
-    
-
     @torch.inference_mode()
     @synchronized
     def init_cache_engine(self, cache_config: CacheConfig, model_config: ModelConfig) -> None:
@@ -183,6 +161,21 @@ class BaseWorker:
             self.gpu_cache = self.cache_engine.get_per_layer_cache(
                 self.model_config.get_num_layers(self.parallel_config)
             )
+            self.model_runner.layer_to_group_idx = {
+                layer_idx: group_idx
+                for layer_idx, (group_idx, _) in self.cache_engine.layer_to_cache_info.items()
+            }
+            # print("000000000000000000000000000000000000")
+            # print(f"DEBUG: Type of kv_cache is {type(self.gpu_cache)}")
+            # print(f"DEBUG: kv_cache is a list of length {len(self.gpu_cache)}")
+            # first_elem = self.gpu_cache[0]
+            # print(f"DEBUG: Type of element inside list: {type(first_elem)}")
+            # # 如果里面装的是张量 (Tensor)
+            # if hasattr(first_elem, 'shape'):
+            #     print(f"DEBUG: Shape of first element: {first_elem.shape}")
+            #     print(f"DEBUG: Shape of last element: {kv_cache[-1].shape}")
+
+
 
             # gpu_cache[layer_idx] = (k_cache, v_cache)         ← Attention 层
             #                      = (conv_state, ssm_state)     ← Mamba 层
@@ -203,6 +196,7 @@ class BaseWorker:
                 kv_cache_config=kv_cache_config,
             )
             return
+
 
 
         # 纯单类型模型：原有路径，不做任何改动

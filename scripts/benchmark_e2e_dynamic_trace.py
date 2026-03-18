@@ -4,24 +4,21 @@ import os
 import utils  # 依赖于你之前提供的 utils.py 模块
 
 # ================= 1. 动态实验核心配置 =================
-num_requests = 100      # 总共模拟发送 1024 个请求
+num_requests = 50      # 总共模拟发送 1024 个请求
 gpu_mem_util = 0.9     # GPU 显存利用率上限 90%
 max_batch_size = num_requests    # 允许的最大批处理大小（并发处理的请求数）
-
-# 从 utils 模块获取模型定义
-# models = utils.models
 
 # 待对比的注意力机制后端（PagedAttention vs vAttention 的各种变体）
 attention_backends = [
     'fi_vattn_2mb',
-    # 'fi_paged_16', 
-    # 'fi_paged_hybird_16',
+    'fi_paged_16', 
+    'fi_paged_hybird_16',
 ]
 
 # QPS (Queries Per Second)：每秒查询率，衡量系统负载压力
 # 测试从低负载 (0.4) 到高负载 (6) 情况下系统的响应能力
-# qps_values = [0.2, 0.6, 1.0, 2.0]
-qps_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+qps_values = [0.02, 0.06, 0.10, 0.14, 0.18, 0.22]
+# qps_values = [0.2]
 # qps_values = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6]
 
 # Chunk Size：Sarathi 调度器特有的参数（在当前代码中 vLLM 模式下暂未激活）
@@ -36,18 +33,13 @@ experiment_dir = utils.dynamic_experiment_dir
 dataset_path = 'scripts/traces/arxiv_sample.csv'
 # dataset_path = 'scripts/artifact_asplos25/traces/arxiv_long_online.csv'
 
-models = ['gemma-3-4b']
+models = ['gemma-3-27b']
 
 dtype="float16"
 
-# 快速测试开关：若命令行带 --test 参数，则只跑极小规模实验以验证脚本可行性
-if utils.args.test == True:
-    models, attention_backends = {'llama-3-8b-2'}, ['fa_vattn_2mb_megacache', 'fa_vattn_2mb']
-    num_requests, qps_values = 100, [4]
-
 # ================= 3. 三层自动化实验循环 =================
 for model in models:
-    for qps in qps_values:
+    for qps in qps_values: 
         for backend in attention_backends:
             
             # --- 参数预处理 ---
@@ -99,7 +91,7 @@ for model in models:
                 
                 '--synthetic_request_generator_num_requests', str(num_requests),
                 '--trace_request_length_generator_max_tokens', str(max_tokens),  # 65536
-                '--trace_request_length_generator_min_tokens', str(1024),
+                '--trace_request_length_generator_min_tokens', str(4096),
                 '--model_block_size', f'{kv_block_size}',
                 '--model_attention_backend', f'{attn_backend_arg}',
                 '--gpu_memory_utilization', f'{gpu_mem_util}',

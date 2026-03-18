@@ -4,14 +4,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 1. 设置基础路径
-base_dir = "../../experiments/e2e_static_eval_gemma3_prefill_test"
+base_dir = "../../experiments/e2e_dynamic_eval_gemma3_50_4k_8K"
 
 # 准备一个列表用于汇总所有实验的计算结果
 summary_data = []
 
 # 2. 编写正则表达式，提取 backend 和 qps
-# dir_pattern = re.compile(r"attn_(.+?)_qps_([0-9.]+)")
-dir_pattern = re.compile(r"attn_(.+?)_prefill_test")
+dir_pattern = re.compile(r"attn_(.+?)_qps_([0-9.]+)")
+# dir_pattern = re.compile(r"attn_(.+?)_prefill_test")
 
 # 3. 遍历目录，读取数据并计算吞吐量指标
 for folder_name in os.listdir(base_dir):

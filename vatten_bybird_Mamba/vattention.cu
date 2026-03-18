@@ -437,6 +437,8 @@ public:
     // state 要么有，要么0，   swa <= windows
     void map_pages_for_curr_step(int reqId, u64 seq_len)
     {
+        if(seq_len == 0) return;  //大于窗口肯定不能有余
+
         u64 nr_required_trans = tokens_to_pages_trans(seq_len);
         u64 nr_mapped_trans = get_req_pages_trans(reqId);
         u64 nr_required_swa = tokens_to_pages_swa(seq_len);  
@@ -797,11 +799,6 @@ public:
         unmap_state_physical_memory_all();
 
         do_kvcache_cleanup_all();
-        // k_tensors_trans.clear();
-        // v_tensors_trans.clear();
-        // k_tensors_swa.clear();
-        // v_tensors_swa.clear();
-        // tensors_state.clear();
         log.log("released memory and cleaned up vattention ...");
     }
 };

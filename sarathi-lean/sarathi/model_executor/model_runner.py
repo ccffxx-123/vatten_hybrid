@@ -314,6 +314,9 @@ class ModelRunner:
             )
             seq_metadata_list.append(seq_metadata)
 
+        # print("11111111111111111111111111111111111")
+        # for seq_meta in seq_metadata_list:
+        #     print(f"seq_meta.seq.get_len(): {seq_meta.prompt_chunk_len}")
         input_tokens, input_positions = self._prepare_inputs(seq_metadata_list)
 
         get_attention_wrapper().begin_forward(seq_metadata_list)
@@ -344,6 +347,8 @@ class ModelRunner:
                 positions=input_positions,
                 kv_caches=[None] * num_layers,
             )
+            # print("0000000000000000000000000000000000")
+            # print(f"input_tokens: {input_tokens.shape}, input_positions: {input_positions.shape}, num_layers: {num_layers}")
 
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
@@ -351,7 +356,7 @@ class ModelRunner:
         peak_memory = torch.cuda.max_memory_allocated()
         total_gpu_memory = get_gpu_memory()
         # print("11111111111111111111111111111111111111111111111111111111111111111111111")
-        # print(f"peak_memory: {peak_memory}, total_gpu_memory: {total_gpu_memory}")
+        # print(f"peak_memory: {peak_memory}, total_gpu_memory: {total_gpu_memory}, gpu_memory_utilization: {gpu_memory_utilization}")
         physical_memory = int(total_gpu_memory * gpu_memory_utilization - peak_memory)
 
 

@@ -41,7 +41,8 @@ llm_engine = LLMEngine.from_engine_args(
 
     # SSM-Transformer-swa
     # model="microsoft/Phi-4-mini-flash-reasoning",  # full + SWA（嵌入Mamba（all 10 MB）） (Samba，适合)
-
+    # vllm混合管理器不支持，但是vllm支持，那我还需要复现吗
+    
     # Transformer
     model="meta-llama/Meta-Llama-3-8B",
 
@@ -85,7 +86,6 @@ llm_engine = LLMEngine.from_engine_args(
     # replica_resource_mapping=[("", 0)],  # 改这里，0→2
     replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
 )
-
 
 
 

@@ -5,22 +5,24 @@ import utils       # 自定义工具模块，包含模型配置、路径获取�
 import torch
 
 # ================= 1. 核心实验配置 =================
-num_requests = 50      # 每个实验场景下发送的并发请求总数
+num_requests = 20      # 每个实验场景下发送的并发请求总数
 gpu_mem_util = 0.9     # GPU 显存占用率阈值（设为 0.9 表示允许模型框架占用 90% 的显存）
 
 models = {'gemma-3-27b'}
 
 attention_backends = [
-    # 'fi_paged_16', 
+    # 'fi_vattn_2mb', 
     # 'fi_paged_hybird_16', 
-    'fi_vattn_2mb', 
+    'fi_paged_16', 
 ]
 
 # context_lengths = [32768, 65536, 131072]
-context_lengths=[4096]
-# context_lengths=[2048 4096 8192 16384]
+context_lengths=[10240]
+# context_lengths=[5120]
+# context_lengths=[2048 4096 8192 16384]12
 
-pd_ratios = [4]
+pd_ratios = [500]
+# pd_ratios = [3]
 # pd_ratios = [500, 100, 50]
 
 src, root, main = utils.get_paths()
@@ -28,15 +30,6 @@ experiment_dir = utils.static_experiment_dir
 
 dtype="float16"
 
-# 快速测试模式：如果运行脚本时带了 --test 参数，则大幅缩减实验规模，用于验证流程是否通畅
-if utils.args.test == True:
-    # models, attention_backends = {'gemma-2-9b', 'Ministral-8B'}, ['fa_paged_256']
-    # num_requests, context_lengths, pd_ratios = 100, [131072], [100] #
-    models, attention_backends = {'gemma-3-27b'}, ['fi_paged_16']  #  
-    num_requests, context_lengths, pd_ratios = 50, [4096], [4] # gemma-3-4b , 16384, 32768, 65536, 131072
-# else: #'fa_paged_256', 'fa_paged_hybird_256',   2048,4096,8192,  , 32768, 65536, 131072
-#     # 正常模式下加载 utils 中定义的所有待测模型映射 ,  2048,4096,8192, 16384, 32768, 65536, 131072, 196608
-#     models = utils.models
 
 torch.cuda.memory._record_memory_history()
 # ================= 3. 自动化实验循环 =================
@@ -85,15 +78,15 @@ for model in models:
 
                     # '--dtype', f'{dtype}',
 
-                    # '--replica_scheduler_max_batch_size', str(1), # 限制最大批次
-                    '--replica_scheduler_max_batch_size', str(max_batch_size), # 限制最大批次
+                    '--replica_scheduler_max_batch_size', str(2), # 限制最大批次
+                    # '--replica_scheduler_max_batch_size', str(max_batch_size), # 限制最大批次
 
                     '--vllm_scheduler_max_tokens_in_batch', str(max_tokens),    # 限制批次内最大 Token 总数
                     '--model_max_model_len', str(max_tokens),                  # 模型最大上下文限制
                     '--metrics_store_enable_op_level_metrics', 'false',        # 关闭算子级监控（提升性能）
                     '--metrics_store_keep_individual_batch_metrics', 'true',   # 保留单个批次的指标数据
                     # 动态生成输出目录名，方便后续数据整理
-                    '--output_dir', f'{experiment_dir}/model_{model_logentry}_tp_{tp_dim}_attn_{backend}_cl_{context_len}_pd_{p_d}_reqs_{num_requests}/',
+                    '--output_dir', f'{experiment_dir}/model_{model_logentry}_tp_{tp_dim}_attn_{backend}_cl_{context_len}_pd_{p_d}_reqs_{num_requests}_bs2/',
                     '--synthetic_request_generator_num_requests', str(num_requests),
                     '--trace_request_generator_max_tokens', str(max_tokens),
                     '--model_block_size', str(kv_block_size),        # 设置 KV Cache 块大小

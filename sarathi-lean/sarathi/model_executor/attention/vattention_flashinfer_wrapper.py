@@ -111,6 +111,7 @@ class VAttentionFlashInferWrapper(BaseAttentionWrapper):
         # 新增参数
         attention_type: str = "full_attention",
         sliding_window: Optional[int] = None,
+        group_idx: Optional[int] = 1,
     ) -> torch.Tensor:
         assert self.is_metadata_initialized, "Metadata is not initialized."
         

@@ -23,17 +23,21 @@ def cleanup_experiment_dirs(target_path, min_file_count=10):
                 file_counter += len(files)
             
             print(f"文件夹: {folder_name} 总文件数: {file_counter}")
-            # # 判断逻辑
-            # if file_counter < min_file_count:
-            #     print(f"正在删除: {folder_name} (文件数: {file_counter})")
-            #     try:
-            #         shutil.rmtree(folder_path)
-            #     except Exception as e:
-            #         print(f"删除 {folder_name} 失败: {e}")
-            # else:
-            #     print(f"保留: {folder_name} (文件数: {file_counter})")
+            # 判断逻辑
+            if file_counter < min_file_count:
+                print(f"正在删除: {folder_name} (文件数: {file_counter})")
+                try:
+                    shutil.rmtree(folder_path)
+                except Exception as e:
+                    print(f"删除 {folder_name} 失败: {e}")
+            else:
+                print(f"保留: {folder_name} (文件数: {file_counter})")
 
 if __name__ == "__main__":
     # 请确保路径正确
-    path = "../../experiments/e2e_static_eval_gemma3_prefill_test"
-    cleanup_experiment_dirs(path)
+    path = "../../experiments"
+    for p in os.listdir(path):
+        p = os.path.join(path, p)
+        # print(p)
+        cleanup_experiment_dirs(p)
+    

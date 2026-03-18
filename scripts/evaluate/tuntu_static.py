@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 1. 设置基础路径 (请确保路径正确)
-base_dir = "../../experiments/e2e_static_eval_gemma3_prefill_test"
+base_dir = "../../experiments/e2e_static_eval_gemma3_test_50_4096_5"
 
 # 准备汇总列表
 summary_data = []

@@ -98,6 +98,7 @@ for i, backend in enumerate(backends):
     # (c) TPOT 曲线
     axes[2].plot(sub_df['QPS'], sub_df['TPOT'], marker=markers[i % len(markers)], 
                  linewidth=2, markersize=6, label=backend)
+    # axes[2].set_ylim(top=0.004)  # 将最大值设置为 100
 
 # 图表排版与格式化
 titles = ['(a) End-to-end latency', '(b) Time to first token', '(c) Time per output token']

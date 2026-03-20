@@ -15,10 +15,15 @@ attention_backends = [
     'fi_paged_hybird_16',
 ]
 
+# Offline Scenarios， 427 个 64K 到 192K Tokens 之间 。
+
+# Online Scenarios， 512  22K 到 45K（平均 29K） 。
+
 # QPS (Queries Per Second)：每秒查询率，衡量系统负载压力
 # 测试从低负载 (0.4) 到高负载 (6) 情况下系统的响应能力
+# qps_values = [0.26, 0.34, 0.38]
 qps_values = [0.02, 0.06, 0.10, 0.14, 0.18, 0.22]
-# qps_values = [0.2]
+# qps_values = [0.04, 0.08, 0.12, 0.16]
 # qps_values = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6]
 
 # Chunk Size：Sarathi 调度器特有的参数（在当前代码中 vLLM 模式下暂未激活）
@@ -30,10 +35,11 @@ src, root, main = utils.get_paths()\
 experiment_dir = utils.dynamic_experiment_dir
 # 拼接完整的数据集轨迹文件路径（如 Arxiv 摘要数据集）
 # dataset_path = os.path.join(root, 'sarathi-lean', utils.dataset_subpath)
-dataset_path = 'scripts/traces/arxiv_sample.csv'
-# dataset_path = 'scripts/artifact_asplos25/traces/arxiv_long_online.csv'
+# dataset_path = 'scripts/traces/arxiv_sample.csv'
+dataset_path = 'scripts/traces/arxiv_long_online.csv'
+# dataset_path = 'scripts/traces/workload_metrics_standard.csv'
 
-models = ['gemma-3-27b']
+models = ['gemma-3-4b']
 
 dtype="float16"
 
@@ -48,7 +54,7 @@ for model in models:
             
             # 计算当前后端支持的最大上下文长度上限
             # max_tokens = utils.get_max_context_length(backend, 8192)
-            max_tokens = 8192
+            max_tokens = 46080  # 8192
             # 获取对应的内存块大小 (Block Size)
             kv_block_size = utils.get_block_or_page_size(backend)
             # 映射为底层引擎识别的后端参数名
@@ -91,7 +97,7 @@ for model in models:
                 
                 '--synthetic_request_generator_num_requests', str(num_requests),
                 '--trace_request_length_generator_max_tokens', str(max_tokens),  # 65536
-                '--trace_request_length_generator_min_tokens', str(4096),
+                '--trace_request_length_generator_min_tokens', str(22528),
                 '--model_block_size', f'{kv_block_size}',
                 '--model_attention_backend', f'{attn_backend_arg}',
                 '--gpu_memory_utilization', f'{gpu_mem_util}',

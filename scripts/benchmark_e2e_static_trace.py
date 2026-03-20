@@ -5,39 +5,40 @@ import utils       # 自定义工具模块，包含模型配置、路径获取�
 import torch
 
 # ================= 1. 核心实验配置 =================
-num_requests = 20      # 每个实验场景下发送的并发请求总数
+num_requests = 50      # 每个实验场景下发送的并发请求总数
 gpu_mem_util = 0.9     # GPU 显存占用率阈值（设为 0.9 表示允许模型框架占用 90% 的显存）
 
-models = {'gemma-3-27b'}
+models = {'gemma-3-4b'}
 
 attention_backends = [
-    # 'fi_vattn_2mb', 
-    # 'fi_paged_hybird_16', 
+    'fi_vattn_2mb', 
+    'fi_paged_hybird_16', 
     'fi_paged_16', 
 ]
 
 # context_lengths = [32768, 65536, 131072]
-context_lengths=[10240]
+context_lengths=[2048, 4096, 8192, 16384, 32768, 65536]  # 2048, 4096, 8192, 16384, 131072
 # context_lengths=[5120]
 # context_lengths=[2048 4096 8192 16384]12
 
-pd_ratios = [500]
+# pd_ratios = [100]
 # pd_ratios = [3]
-# pd_ratios = [500, 100, 50]
+pd_ratios = [100] # 500, 
 
 src, root, main = utils.get_paths()
 experiment_dir = utils.static_experiment_dir
 
-dtype="float16"
+#dtype="float16"
 
 
 torch.cuda.memory._record_memory_history()
 # ================= 3. 自动化实验循环 =================
 # 使用四层嵌套循环进行“网格搜索”式的对比实验
 for model in models:
-    for backend in attention_backends:
-        for p_d in pd_ratios:
-            for context_len in context_lengths:
+    for p_d in pd_ratios:
+        experiment_dir = f"{utils.static_experiment_dir}_{p_d}"
+        for context_len in context_lengths:
+            for backend in attention_backends:
                 
                 # --- 动态参数计算 ---
                 model_logentry = utils.models[model]['logentry']  # 获取模型在日志中的标识名
@@ -78,15 +79,15 @@ for model in models:
 
                     # '--dtype', f'{dtype}',
 
-                    '--replica_scheduler_max_batch_size', str(2), # 限制最大批次
-                    # '--replica_scheduler_max_batch_size', str(max_batch_size), # 限制最大批次
+                    # '--replica_scheduler_max_batch_size', str(2), # 限制最大批次
+                    '--replica_scheduler_max_batch_size', str(max_batch_size), # 限制最大批次
 
                     '--vllm_scheduler_max_tokens_in_batch', str(max_tokens),    # 限制批次内最大 Token 总数
                     '--model_max_model_len', str(max_tokens),                  # 模型最大上下文限制
                     '--metrics_store_enable_op_level_metrics', 'false',        # 关闭算子级监控（提升性能）
                     '--metrics_store_keep_individual_batch_metrics', 'true',   # 保留单个批次的指标数据
                     # 动态生成输出目录名，方便后续数据整理
-                    '--output_dir', f'{experiment_dir}/model_{model_logentry}_tp_{tp_dim}_attn_{backend}_cl_{context_len}_pd_{p_d}_reqs_{num_requests}_bs2/',
+                    '--output_dir', f'{experiment_dir}/model_{model_logentry}_tp_{tp_dim}_attn_{backend}_cl_{context_len}_pd_{p_d}_reqs_{num_requests}/',
                     '--synthetic_request_generator_num_requests', str(num_requests),
                     '--trace_request_generator_max_tokens', str(max_tokens),
                     '--model_block_size', str(kv_block_size),        # 设置 KV Cache 块大小

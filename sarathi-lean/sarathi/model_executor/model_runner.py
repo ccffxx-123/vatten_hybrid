@@ -26,6 +26,7 @@ from sarathi.model_executor.attention import AttentionBackend
 from sarathi.model_executor.attention import get_mamba_wrapper
 from sarathi.model_executor.attention import AttentionBackend
 from sarathi.core.datatypes.mamba_metadata import MambaInputMetadata
+from sarathi.worker.vattn_state_registry import get_vattn_slot_map
 logger = init_logger(__name__)
 
 
@@ -232,6 +233,7 @@ class ModelRunner:
         self,
         seq_metadata_list: List[SequenceMetadata],
         is_profiling: bool = False,
+        vattn_slot_map: Optional[Dict[int, int]] = None,  # NEW
     ) -> MambaInputMetadata:
         """
         构建 MambaInputMetadata。
@@ -267,6 +269,7 @@ class ModelRunner:
             seq_lens=seq_lens,
             seq_token_offsets=seq_token_offsets,
             seq_metadata_list=None if is_profiling else seq_metadata_list,
+            vattn_slot_map=vattn_slot_map,  # NEW
         )
 
 
@@ -396,8 +399,18 @@ class ModelRunner:
 
         input_metadata = None
         if self.has_mamba_layers:
+            # Fetch vAttention slot map when using that backend
+            vattn_slot_map = None
+            if AttentionBackend.is_vATTN(self.model_config.attention_backend):
+                # The cache engine is accessible through the worker; we pass
+                # the map via a module-level registry to avoid threading
+                # it through every call frame.  See note in base_worker.py.
+                vattn_slot_map = get_vattn_slot_map()   # see step 4 below
+
             input_metadata = self._build_mamba_metadata(
-                seq_metadata_list, is_profiling=False
+                seq_metadata_list,
+                is_profiling=False,
+                vattn_slot_map=vattn_slot_map,
             )
 
         with self._model_execution_e2e_timer:

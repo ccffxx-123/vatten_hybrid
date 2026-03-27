@@ -46,10 +46,8 @@ def get_config(
         return config
 
     if config.model_type == "nemotron_h":
-        # print(f'config.model_type = {config.model_type}')
-        # print(f'config = {config}')
         config = NemotronHTextConfig.from_nemotron_h_config(config)
-        print(f'config = {config}')
+        # print(f'config = {config}')
         return config
 
     if config.model_type in _CONFIG_REGISTRY:

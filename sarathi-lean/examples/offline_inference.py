@@ -32,19 +32,18 @@ llm_engine = LLMEngine.from_engine_args(
     # 模型路径 (HuggingFace ID 或本地路径)
 
     # sliding attention
-    # model="google/gemma-3-4b-it",       # 窗口1024  29:5 
+    model="google/gemma-3-4b-it",       # 窗口1024  29:5 
     # model="google/gemma-3-27b-it",       # 窗口1024  52:10 （适合）
-    # dtype="bfloat16",  # <--- 明确指定使用 bfloat16 (或者写 "auto")
+    dtype="bfloat16",  # <--- 明确指定使用 bfloat16 (或者写 "auto")
     
     # SSM-Transformer
     # model="nvidia/Nemotron-H-8B-Reasoning-128K",      # 24:4  512  0 (适合)
 
     # SSM-Transformer-swa
     # model="microsoft/Phi-4-mini-flash-reasoning",  # full + SWA（嵌入Mamba（all 10 MB）） (Samba，适合)
-    # vllm混合管理器不支持，但是vllm支持，那我还需要复现吗
     
     # Transformer
-    model="meta-llama/Meta-Llama-3-8B",
+    # model="meta-llama/Meta-Llama-3-8B",
 
     
     
@@ -72,7 +71,7 @@ llm_engine = LLMEngine.from_engine_args(
     # attention_backend="fi_paged",
     attention_backend="fi_paged_hybird",
     # attention_backend="fa_paged_hybird",
-    gpu_memory_utilization=0.6,
+    gpu_memory_utilization=0.9,
 
 
     # block_size=2 * MB, # KV Cache 块大小

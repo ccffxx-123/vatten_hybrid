@@ -1,4 +1,4 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Dict
 
 if TYPE_CHECKING:
     from sarathi.core.datatypes.sequence import SequenceMetadata
@@ -24,8 +24,12 @@ class MambaInputMetadata:
         seq_lens: List[int],
         seq_token_offsets: List[int],
         seq_metadata_list: Optional[List["SequenceMetadata"]] = None,
+        # NEW: seq_id -> physical slot_id in the vAttention state tensor.
+        # None = not using vAttention backend (paged path uses block_tables).
+        vattn_slot_map: Optional[Dict[int, int]] = None,
     ):
         self.seq_is_prefill = seq_is_prefill
         self.seq_lens = seq_lens
         self.seq_token_offsets = seq_token_offsets
         self.seq_metadata_list = seq_metadata_list
+        self.vattn_slot_map = vattn_slot_map  # NEW

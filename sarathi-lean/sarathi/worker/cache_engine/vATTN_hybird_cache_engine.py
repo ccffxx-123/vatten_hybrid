@@ -68,111 +68,216 @@ class vATTNCacheEngine(BaseCacheEngine):
     # ------------------------------------------------------------------
 
     def _init_hybrid_params(self, model_config: ModelConfig, parallel_config: ParallelConfig):
-        """Extract per-layer-type counts and Mamba/SWA dimensions."""
-        # Layer counts -------------------------------------------------
-        self.num_layers_trans, self.num_layers_swa, self.num_layers_state = model_config.get_num_layers_by_type()
+        self.num_layers_trans, self.num_layers_swa, self.num_layers_state = \
+            model_config.get_num_layers_by_type()
 
-        # Mamba / SWA dimensions ---------------------------------------
-        self.d_state = model_config.get_d_state() or 16  # C++ needs > 0
-        self.window_size = model_config.get_window_size() or 256
-        self.hidden_size = model_config.get_hidden_size()
-
-        # Per-layer type list (length = total num_layers) ----------------
         self.layer_type_list = model_config.get_layer_type_list()
+        self.window_size     = model_config.get_window_size() or 256
 
-        # print(f'1111111111111111111111111111111111111111111111111111111111111111111111111')
-        # print(f"num_layers_trans: {self.num_layers_trans}")
-        # print(f"num_layers_swa: {self.num_layers_swa}")
-        # print(f"num_layers_state: {self.num_layers_state}")
+        cfg = model_config.hf_config
 
+        # Mamba-2 维度
+        if self.num_layers_state > 0:
+            self.mamba_num_heads = cfg.mamba_num_heads    # 128
+            self.mamba_head_dim  = cfg.mamba_head_dim     # 64
+            self.ssm_state_size  = cfg.ssm_state_size     # 128
+            self.conv_kernel     = cfg.conv_kernel         # 4
+            self.n_groups        = cfg.n_groups            # 8
+        else:
+            self.mamba_num_heads = 1
+            self.mamba_head_dim  = 1
+            self.ssm_state_size  = 1
+            self.conv_kernel     = 1
+            self.n_groups        = 1
+
+        self.conv_dim = (
+            self.mamba_num_heads * self.mamba_head_dim       # 8192
+            + 2 * self.n_groups * self.ssm_state_size        # 2048
+        )                                                     # = 10240
+        self.conv_kernel_m1 = self.conv_kernel - 1            # = 3
+
+        # mamba_params 列表，顺序与 C++ mamba_params_[0..4] 对应
+        self.mamba_params = [
+            self.conv_dim,           # [0] conv_dim
+            self.conv_kernel_m1,     # [1] conv_kernel_m1
+            self.mamba_num_heads,    # [2] mamba_num_heads
+            self.mamba_head_dim,     # [3] mamba_head_dim
+            self.ssm_state_size,     # [4] d_state (ssm_state_size)
+        ]
 
     # ------------------------------------------------------------------
     # Core: allocate virtual KV cache
     # ------------------------------------------------------------------
 
-    def allocate_gpu_cache(self) -> List[KVCache]:
-        """Call hybrid ``vattention.init_kvcache`` and slice the 5 returned
-        tensors into a per-layer cache list.
+    # def allocate_gpu_cache(self) -> List[KVCache]:
+    #     """Call hybrid ``vattention.init_kvcache`` and slice the 5 returned
+    #     tensors into a per-layer cache list.
 
-        Returns
-        -------
-        cache_list : list[KVCache]
-            ``cache_list[i]`` is either ``(k_tensor, v_tensor)`` for
-            attention layers or a single ``state_tensor`` for Mamba layers.
-            The model forward pass uses ``kv_caches[layer_id]``.
-        """
-        # vattention.set_verbose(True)
+    #     Returns
+    #     -------
+    #     cache_list : list[KVCache]
+    #         ``cache_list[i]`` is either ``(k_tensor, v_tensor)`` for
+    #         attention layers or a single ``state_tensor`` for Mamba layers.
+    #         The model forward pass uses ``kv_caches[layer_id]``.
+    #     """
+    #     # vattention.set_verbose(True)
+    #     kv_tensors = vattention.init_kvcache(
+    #         [self.num_layers_trans, self.num_layers_swa, self.num_layers_state],
+    #         self.num_heads,       # num_kv_heads (from BaseCacheEngine)
+    #         self.head_size,       # head_size    (from BaseCacheEngine)
+    #         self.max_batch_size,
+    #         self.max_model_seq_len,
+    #         self.device_idx,
+    #         self.hidden_size,
+    #         self.d_state,
+    #         self.window_size,
+    #         self.dtype,           # torch dtype  (from BaseCacheEngine)
+    #     )
+
+    #     # Unpack the 5 tensors returned by the C++ side
+    #     k_trans, v_trans, k_swa, v_swa, state = kv_tensors
+    #     # Shapes:
+    #     #   k/v_trans : [B, T, num_layers_trans, H, D]
+    #     #   k/v_swa   : [B, T, num_layers_swa,  H, D]
+    #     #   state     : [B, num_layers_state, hidden, d_state]
+
+    #     # Verify devices
+    #     for name, t in [("k_trans", k_trans), ("v_trans", v_trans),
+    #                     ("k_swa", k_swa), ("v_swa", v_swa),
+    #                     ("state", state)]:
+    #         assert t.device == self.device, (
+    #             f"{name} device mismatch: expected {self.device}, got {t.device}"
+    #         )
+
+    #     # Store raw tensors for cleanup / direct access
+    #     self._k_trans = k_trans
+    #     self._v_trans = v_trans
+    #     self._k_swa = k_swa
+    #     self._v_swa = v_swa
+    #     self._state = state
+
+    #     # Build per-layer cache list -----------------------------------
+    #     trans_idx = 0
+    #     swa_idx = 0
+    #     state_idx = 0
+    #     cache_list: List[KVCache] = []
+
+    #     for layer_type in self.layer_type_list:
+    #         if layer_type == "trans":
+    #             # Slice out one layer: result shape [B, T, H, D]
+    #             k_slice = k_trans[:, :, trans_idx, :, :]
+    #             v_slice = v_trans[:, :, trans_idx, :, :]
+    #             cache_list.append((k_slice, v_slice))
+    #             trans_idx += 1
+    #         elif layer_type == "swa":
+    #             k_slice = k_swa[:, :, swa_idx, :, :]
+    #             v_slice = v_swa[:, :, swa_idx, :, :]
+    #             cache_list.append((k_slice, v_slice))
+    #             swa_idx += 1
+    #         elif layer_type == "state":
+    #             # Slice out one Mamba layer: shape [B, hidden, d_state]
+    #             s_slice = state[:, state_idx, :, :]
+    #             cache_list.append(s_slice)
+    #             state_idx += 1
+    #         else:
+    #             raise ValueError(f"Unknown layer type: {layer_type}")
+
+    #     # Reserve physical pages for the VMM allocator
+    #     vattention.reserve_physical_pages(self.cache_mem_size)
+
+    #     logger.info(
+    #         f"Hybrid vATTN cache initialised: "
+    #         f"trans={self.num_layers_trans} swa={self.num_layers_swa} "
+    #         f"state={self.num_layers_state} layers, "
+    #         f"window={self.window_size} d_state={self.d_state}"
+    #     )
+
+    #     return cache_list
+
+    def allocate_gpu_cache(self) -> list:
         kv_tensors = vattention.init_kvcache(
             [self.num_layers_trans, self.num_layers_swa, self.num_layers_state],
-            self.num_heads,       # num_kv_heads (from BaseCacheEngine)
-            self.head_size,       # head_size    (from BaseCacheEngine)
+            self.num_heads,
+            self.head_size,
             self.max_batch_size,
             self.max_model_seq_len,
             self.device_idx,
-            self.hidden_size,
-            self.d_state,
+            self.mamba_params,
             self.window_size,
-            self.dtype,           # torch dtype  (from BaseCacheEngine)
+            self.dtype,
         )
 
-        # Unpack the 5 tensors returned by the C++ side
-        k_trans, v_trans, k_swa, v_swa, state = kv_tensors
-        # Shapes:
-        #   k/v_trans : [B, T, num_layers_trans, H, D]
-        #   k/v_swa   : [B, T, num_layers_swa,  H, D]
-        #   state     : [B, num_layers_state, hidden, d_state]
+        k_trans, v_trans, k_swa, v_swa, flat_state = kv_tensors
+        # flat_state: [max_batch_size, conv_elems_per_slot + ssm_elems_per_slot]
+        # 每行 = 一个 slot = 一个请求的全部层状态
 
-        # Verify devices
-        for name, t in [("k_trans", k_trans), ("v_trans", v_trans),
-                        ("k_swa", k_swa), ("v_swa", v_swa),
-                        ("state", state)]:
-            assert t.device == self.device, (
-                f"{name} device mismatch: expected {self.device}, got {t.device}"
-            )
-
-        # Store raw tensors for cleanup / direct access
         self._k_trans = k_trans
         self._v_trans = v_trans
-        self._k_swa = k_swa
-        self._v_swa = v_swa
-        self._state = state
+        self._k_swa   = k_swa
+        self._v_swa   = v_swa
 
-        # Build per-layer cache list -----------------------------------
-        trans_idx = 0
-        swa_idx = 0
-        state_idx = 0
-        cache_list: List[KVCache] = []
+        # ── 在 slot 内部按 conv / ssm 切分 ──────────────────────────────
+        conv_elems_per_slot = (
+            self.conv_dim * self.conv_kernel_m1 * self.num_layers_state
+        )
+        ssm_elems_per_slot = (
+            self.mamba_num_heads * self.mamba_head_dim
+            * self.ssm_state_size * self.num_layers_state
+        )
+
+        # split 沿 dim=1（slot 内部）切出 conv 和 ssm 两段
+        # conv_all: [B, conv_elems_per_slot]
+        # ssm_all:  [B, ssm_elems_per_slot]
+        conv_all, ssm_all = flat_state.split(
+            [conv_elems_per_slot, ssm_elems_per_slot], dim=1
+        )
+
+        # view 成 [B, num_layers_state, ...] 保持 slot 在第 0 维
+        conv_pool = conv_all.view(
+            self.max_batch_size,
+            self.num_layers_state,
+            self.conv_dim,
+            self.conv_kernel_m1,
+        )  # [B, L_state, conv_dim, conv_kernel-1]
+        # conv_pool[slot_id, layer_idx] → (conv_dim, conv_kernel-1) = (10240, 3)
+
+        ssm_pool = ssm_all.view(
+            self.max_batch_size,
+            self.num_layers_state,
+            self.mamba_num_heads,
+            self.mamba_head_dim,
+            self.ssm_state_size,
+        )  # [B, L_state, num_heads, head_dim, ssm_state_size]
+        # ssm_pool[slot_id, layer_idx] → (128, 64, 128)
+
+        # ── 按层构建 cache_list ──────────────────────────────────────────
+        trans_idx = swa_idx = state_idx = 0
+        cache_list = []
 
         for layer_type in self.layer_type_list:
             if layer_type == "trans":
-                # Slice out one layer: result shape [B, T, H, D]
-                k_slice = k_trans[:, :, trans_idx, :, :]
-                v_slice = v_trans[:, :, trans_idx, :, :]
-                cache_list.append((k_slice, v_slice))
+                cache_list.append((
+                    k_trans[:, :, trans_idx, :, :],
+                    v_trans[:, :, trans_idx, :, :],
+                ))
                 trans_idx += 1
             elif layer_type == "swa":
-                k_slice = k_swa[:, :, swa_idx, :, :]
-                v_slice = v_swa[:, :, swa_idx, :, :]
-                cache_list.append((k_slice, v_slice))
+                cache_list.append((
+                    k_swa[:, :, swa_idx, :, :],
+                    v_swa[:, :, swa_idx, :, :],
+                ))
                 swa_idx += 1
             elif layer_type == "state":
-                # Slice out one Mamba layer: shape [B, hidden, d_state]
-                s_slice = state[:, state_idx, :, :]
-                cache_list.append(s_slice)
+                # 每层拿到自己对应的 layer_idx 切片
+                # [B, conv_dim, conv_kernel-1]  — slot_id 索引第 0 维
+                # [B, num_heads, head_dim, ssm_state_size]
+                cache_list.append((
+                    conv_pool[:, state_idx, :, :],
+                    ssm_pool[:, state_idx, :, :, :],
+                ))
                 state_idx += 1
-            else:
-                raise ValueError(f"Unknown layer type: {layer_type}")
 
-        # Reserve physical pages for the VMM allocator
         vattention.reserve_physical_pages(self.cache_mem_size)
-
-        logger.info(
-            f"Hybrid vATTN cache initialised: "
-            f"trans={self.num_layers_trans} swa={self.num_layers_swa} "
-            f"state={self.num_layers_state} layers, "
-            f"window={self.window_size} d_state={self.d_state}"
-        )
-
         return cache_list
 
     # ------------------------------------------------------------------
@@ -344,3 +449,20 @@ class vATTNCacheEngine(BaseCacheEngine):
     def show_allocator_state(self):
         # vattention.set_verbose(True)
         vattention.show_allocator_state()
+
+
+    def get_mamba_slot_map(self) -> dict:
+        """Return {seq_id: slot_id} for every currently active request.
+        slot_id is the physical index into kv_cache[0] / kv_cache[1] for
+        Mamba state.  reqId and slot_id are NOT the same value:
+        - reqId  = attention batch slot (0..max_batch_size)
+        - slot_id = Mamba state slot assigned by the compact slot allocator
+        """
+        slot_map = {}
+        for seq_id, req_id in self.seq_to_batch_idx.items():
+            slot_id = vattention.get_state_slot_id(req_id)
+            # -1 means this request has no Mamba state (pure-attention model)
+            if slot_id >= 0:
+                slot_map[seq_id] = slot_id
+        return slot_map
+

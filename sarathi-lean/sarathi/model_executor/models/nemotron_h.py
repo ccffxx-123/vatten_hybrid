@@ -312,34 +312,69 @@ class NemotronHMamba2Layer(nn.Module):
         except ImportError:
             pass
 
-    def _get_block_id_for_seq(
-        self,
-        seq_meta: "SequenceMetadata",
-    ) -> int:
-        """
-        从本层对应 group 的 block_table 中找到最后一个有效 block_id。
- 
-        MambaManager 会把窗口外（即除最后一个 token 状态之外）的 block
-        替换为 null_block（block_id=0），因此有效 block 就是最后一个非 0 的 id。
- 
-        返回 0 表示"无有效 block"（profiling 阶段 / 尚未分配），
-        调用方收到 0 后应跳过 cache 读写（null_block 保护）。
-        """
-        # profiling 阶段：block_tables 尚未初始化
-        if seq_meta.block_tables is None:
-            return 0
- 
-        assert self.group_idx is not None, (
-            f"NemotronHMamba2Layer(layer_id={self.layer_id}) 的 group_idx 未设置，"
-            f"请确认 NemotronHModel.set_mamba_group_indices() 已被调用。"
-        )
- 
-        if self.group_idx >= len(seq_meta.block_tables):
-            return 0
- 
-        mamba_table = seq_meta.block_tables[self.group_idx]
-        valid_ids = [bid for bid in mamba_table if bid != 0]
-        return valid_ids[-1] if valid_ids else 0
+    # # sarathi/model_executor/models/nemotron_h.py
+    # def _get_slot_id_for_seq(self, seq_meta, input_metadata) -> int:
+    #     """返回物理 cache slot index，-1 表示无效（未分配/profiling）。"""
+    #     if seq_meta is None:
+    #         return -1
+
+    #     vattn_map = getattr(input_metadata, 'vattn_slot_map', None)
+    #     if vattn_map is not None:
+    #         seq_id = seq_meta.seq.seq_id
+    #         slot_id = vattn_map.get(seq_id, None)
+    #         if slot_id is None:
+    #             slot_id = vattn_map.get(int(seq_id), None)
+    #         if slot_id is None:
+    #             slot_id = vattn_map.get(str(seq_id), None)
+    #         return slot_id if slot_id is not None else -1  # -1 = 未在 map 中
+
+    #     # paged 路径：block_id=0 是 null block
+    #     if seq_meta.block_tables is None:
+    #         return -1
+    #     assert self.group_idx is not None
+    #     if self.group_idx >= len(seq_meta.block_tables):
+    #         return -1
+    #     mamba_table = seq_meta.block_tables[self.group_idx]
+    #     valid_ids = [bid for bid in mamba_table if bid != 0]
+    #     return valid_ids[-1] if valid_ids else -1
+
+
+    def _get_slot_id_for_seq(self, seq_meta, input_metadata) -> int:
+        if seq_meta is None:
+            return -1
+
+        # ── vAttention 路径 ──────────────────────────────────────────────
+        vattn_map = getattr(input_metadata, 'vattn_slot_map', None)
+        if vattn_map is not None:
+            seq_id = seq_meta.seq.seq_id
+            slot_id = vattn_map.get(seq_id, None)
+            if slot_id is None:
+                slot_id = vattn_map.get(int(seq_id), None)
+            if slot_id is None:
+                slot_id = vattn_map.get(str(seq_id), None)
+            return slot_id if slot_id is not None else -1
+
+        # ── hybrid paged 路径（HybridWorkerSequenceManager 填 block_tables）──
+        if seq_meta.block_tables is not None:
+            assert self.group_idx is not None
+            if self.group_idx >= len(seq_meta.block_tables):
+                return -1
+            mamba_table = seq_meta.block_tables[self.group_idx]
+            valid_ids = [bid for bid in mamba_table if bid != 0]
+            return valid_ids[-1] if valid_ids else -1
+
+        # ── 普通 paged 路径（WorkerSequenceManager 只填 block_table）──────
+        # fi_paged / fa_paged 后端走这里
+        # block_table 是 attention 层的，Mamba 层没有独立的 paged block table，
+        # 直接用 seq_id 作为 slot 索引（每个请求占固定位置）
+        if seq_meta.block_table is not None and len(seq_meta.block_table) > 0:
+            # 普通 paged 后端：Mamba state 按 seq_id 直接索引 cache tensor
+            # cache tensor 形状 [max_batch_size, ...], seq_id 即 slot
+            return seq_meta.seq.seq_id if isinstance(seq_meta.seq.seq_id, int) \
+                else int(seq_meta.seq.seq_id)
+
+        return -1
+
 
     def _init_norm(self, config):
         try:
@@ -441,15 +476,27 @@ class NemotronHMamba2Layer(nn.Module):
             )
 
              # ── 解析 block_id（按本层的 group_idx 查正确的 block_table）──
+            # if is_profiling:
+            #     block_id = 0
+            # else:
+            #     seq_meta = input_metadata.seq_metadata_list[i]
+            #     # block_id = self._get_block_id_for_seq(seq_meta)
+            #     block_id = self._get_slot_id_for_seq(seq_meta, input_metadata)  # ← NEW name
+
+            # # --- 取出当前序列对应的物理 Cache ---
+            # # block_id = 0 通常是 Null Block，避免对其进行无效读写
+            # valid_cache = (kv_cache is not None) and (block_id != 0)
+
             if is_profiling:
-                block_id = 0
+                block_id = -1
             else:
                 seq_meta = input_metadata.seq_metadata_list[i]
-                block_id = self._get_block_id_for_seq(seq_meta)
+                # block_id = self._get_block_id_for_seq(seq_meta)
+                block_id = self._get_slot_id_for_seq(seq_meta, input_metadata)  # ← NEW name
 
             # --- 取出当前序列对应的物理 Cache ---
             # block_id = 0 通常是 Null Block，避免对其进行无效读写
-            valid_cache = (kv_cache is not None) and (block_id != 0)
+            valid_cache = (kv_cache is not None) and (block_id >= 0)
             
             if valid_cache:
                 conv_state = kv_cache[0][block_id]  # (conv_dim, conv_kernel)
@@ -525,6 +572,7 @@ class NemotronHMamba2Layer(nn.Module):
                     # 变回 (1, intermediate_size)，然后再补回序列维度 seq_len=1，最终成为 (1, 1, intermediate_size)
                     scan_output = scan_output.view(1, 1, self.intermediate_size)
                 else:
+                    print(f"[DEBUG] decode fallback: _has_cuda_kernels={self._has_cuda_kernels}, valid_cache={valid_cache}, block_id={block_id}, slot_id from vattn_map={input_metadata.vattn_slot_map}")
                     raise NotImplementedError("PyTorch fallback for Mamba-2 decode not implemented.")
 
             else:

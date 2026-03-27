@@ -70,30 +70,44 @@ _pool_logger    = _build_logger(
 
 
 class KVCacheLogger:
-    """统一入口，按类别路由到不同日志文件。"""
+    """统一入口，按类别路由到不同日志文件，支持动态开关。"""
+
+    def __init__(self, default_enable: bool = False):
+        # 默认是否开启日志
+        self.set_enable(default_enable)
+
+    def set_enable(self, enable: bool) -> None:
+        """动态开启或关闭所有 KV Cache 日志"""
+        self.is_enabled = enable
+        # 利用 Python logging 原生的 disabled 属性，彻底阻断日志处理，开销极小
+        _layout_logger.disabled = not enable
+        _alloc_logger.disabled = not enable
+        _pool_logger.disabled = not enable
+        
+        # 可以在控制台打印一下状态，方便确认
+        print(f"[KVCacheLogger] 日志记录状态已切换为: {'开启' if enable else '关闭'}")
 
     # ── 缓冲区规划 ──
     def layout(self, msg: str) -> None:
-        _layout_logger.info(msg)
+        if self.is_enabled: _layout_logger.info(msg)
 
     def layout_debug(self, msg: str) -> None:
-        _layout_logger.debug(msg)
+        if self.is_enabled: _layout_logger.debug(msg)
 
     # ── Block 分配/释放 ──
     def alloc(self, msg: str) -> None:
-        _alloc_logger.info(msg)
+        if self.is_enabled: _alloc_logger.info(msg)
 
     def alloc_debug(self, msg: str) -> None:
-        _alloc_logger.debug(msg)
+        if self.is_enabled: _alloc_logger.debug(msg)
 
     # ── BlockPool 底层 ──
     def pool(self, msg: str) -> None:
-        _pool_logger.info(msg)
+        if self.is_enabled: _pool_logger.info(msg)
 
     def pool_debug(self, msg: str) -> None:
-        _pool_logger.debug(msg)
+        if self.is_enabled: _pool_logger.debug(msg)
 
 
-# 全局单例，其他模块直接 import 使用
-kv_logger = KVCacheLogger()
-
+# 全局单例，默认关闭。其他模块直接 import 使用
+kv_logger = KVCacheLogger(default_enable=False)

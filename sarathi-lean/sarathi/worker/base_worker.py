@@ -31,6 +31,7 @@ from sarathi.utils.threading_utils import synchronized
 from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.worker.cache_engine import get_cache_mem_alloc_backend
 from sarathi.model_executor.attention import AttentionBackend
+from sarathi.worker.vattn_state_registry import register_cache_engine
 
 logger = init_logger(__name__)
 
@@ -165,28 +166,6 @@ class BaseWorker:
                 layer_idx: group_idx
                 for layer_idx, (group_idx, _) in self.cache_engine.layer_to_cache_info.items()
             }
-            # print("000000000000000000000000000000000000")
-            # print(f"DEBUG: Type of kv_cache is {type(self.gpu_cache)}")
-            # print(f"DEBUG: kv_cache is a list of length {len(self.gpu_cache)}")
-            # first_elem = self.gpu_cache[0]
-            # print(f"DEBUG: Type of element inside list: {type(first_elem)}")
-            # # 如果里面装的是张量 (Tensor)
-            # if hasattr(first_elem, 'shape'):
-            #     print(f"DEBUG: Shape of first element: {first_elem.shape}")
-            #     print(f"DEBUG: Shape of last element: {kv_cache[-1].shape}")
-
-
-
-            # gpu_cache[layer_idx] = (k_cache, v_cache)         ← Attention 层
-            #                      = (conv_state, ssm_state)     ← Mamba 层
-            #                         = None                        ← padding 层
-            # print("111111111111111111111111111111111111111111111111111111111111111111111111111")
-            # for layer_cache in self.gpu_cache:
-            #     if layer_cache is not None:
-                    # k_cache, v_cache = layer_cache
-                    # kv_cache = layer_cache
-                    # print(f'layer_type = {self.model_config.get_layer_type_list(layer_idx)}')
-                    # print(f'k_cache.shape, v_cache.shape = {k_cache.shape}, {v_cache.shape}')
 
             self.seq_manager = HybridWorkerSequenceManager(
                 cache_config=self.cache_config,
@@ -196,7 +175,6 @@ class BaseWorker:
                 kv_cache_config=kv_cache_config,
             )
             return
-
 
 
         # 纯单类型模型：原有路径，不做任何改动
@@ -209,6 +187,7 @@ class BaseWorker:
             self.cache_config, self.model_config,
             self.parallel_config, mem_alloc_backend,
         )
+        register_cache_engine(self.cache_engine)   # ← add this line
         self.gpu_cache = self.cache_engine.gpu_cache
         self.seq_manager = WorkerSequenceManager(
             self.cache_config, self.scheduler_config,
@@ -259,7 +238,7 @@ class BaseWorker:
 
         self.on_step_completed(scheduler_outputs, sampler_outputs)
         self.cache_engine.on_step_completion(seq_metadata_list)
-        
+    
 
         batch_stage_end_time = time.monotonic()
 

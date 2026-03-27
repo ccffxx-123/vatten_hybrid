@@ -1,0 +1,41 @@
+model: meta-llama/Meta-Llama-3-8B
+replica_id: 0
+replica_resource_mapping:
+- !!python/tuple
+  - ''
+  - 3
+tokenizer: meta-llama/Meta-Llama-3-8B
+tokenizer_mode: auto
+trust_remote_code: true
+download_dir: null
+load_format: dummy
+dtype: float16
+seed: 42
+pipeline_parallel_size: 1
+tensor_parallel_size: 1
+block_size: 2097152
+gpu_memory_utilization: 0.9
+revision: null
+scheduler_type: vllm
+max_model_len: 32768
+max_num_seqs: 5
+max_num_batched_tokens: 32768
+chunk_size: null
+enable_dynamic_chunking_schedule: false
+low_chunk_size: 128
+high_chunk_size: 2048
+chunk_schedule_max_tokens: 131072
+chunk_schedule_stages: 16
+write_metrics: true
+output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_llama_test/model_llama-3-8b_tp_1_attn_fi_vattn_2mb_cl_32768_pd_500_reqs_5///replica_0
+wandb_project: ''
+wandb_sweep_id: ''
+wandb_run_id: ''
+wandb_group: ''
+wandb_run_name: ''
+enable_op_level_metrics: false
+enable_cpu_op_level_metrics: false
+enable_chrome_trace: true
+enable_request_outputs: false
+keep_individual_batch_metrics: true
+attention_backend: fi_vattn

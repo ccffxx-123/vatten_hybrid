@@ -56,6 +56,12 @@ for folder_name in os.listdir(base_dir):
 
 # 将汇总结果转为 DataFrame
 summary_df = pd.DataFrame(summary_data)
+# ================== 【修改点：新增】筛选掉 QPS 大于 0.3 的数据 ==================
+summary_df = summary_df[summary_df['QPS'] < 0.25]
+summary_df = summary_df[summary_df['QPS'] != 0.12]
+summary_df = summary_df[summary_df['QPS'] != 0.16]
+summary_df = summary_df[summary_df['QPS'] != 0.04]
+summary_df = summary_df[summary_df['QPS'] != 0.08]
 
 if summary_df.empty:
     print("未找到任何有效数据，请检查 base_dir 路径和文件夹格式。")

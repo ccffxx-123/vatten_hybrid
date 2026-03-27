@@ -21,7 +21,7 @@ main = os.path.join(root, 'sarathi-lean', 'sarathi', 'benchmark', 'main.py')
 
 # 静态评估和动态评估的实验结果保存路径
 static_experiment_dir = os.path.join(root, 'experiments', 'e2e_static_eval_gemma3_test_4b_pd') # vatten_gemma3_27b  vatten_gemma3_27b
-dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_gemma3_50_22k_40k_4b')
+dynamic_experiment_dir = os.path.join(root, 'experiments', 'e2e_dynamic_eval_gemma3_4b_arivxlong')
 
 # ================= 数据集配置 =================
 # 默认使用 arXiv 摘要数据集的预处理轨迹文件

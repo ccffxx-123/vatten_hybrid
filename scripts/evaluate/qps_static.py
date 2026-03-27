@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 1. 设置基础路径（请确保该路径与你本地的实际路径一致）
-base_dir = "../../experiments/e2e_static_eval_gemma3_test_4b_pd_100"
+base_dir = "../../experiments/e2e_static_eval_gemma3_test_4b_pd_500"
 
 # 准备一个列表用于汇总所有实验的计算结果
 summary_data = []

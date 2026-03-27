@@ -123,7 +123,7 @@ import seaborn as sns
 
 # ================== 配置部分 ==================
 # 1. 设置基础路径 (请确保路径正确)
-base_dir = "../../experiments/e2e_static_eval_gemma3_test_4b_pd_100"
+base_dir = "../../experiments/e2e_static_eval_gemma3_test_4b_pd_500"
 # 运行输出的图片前缀
 output_prefix = "throughput_trend"
 
@@ -189,6 +189,7 @@ for folder_name in os.listdir(base_dir):
 
 # 将汇总结果转为 DataFrame
 df_raw = pd.DataFrame(summary_data)
+print(df_raw)
 
 if df_raw.empty:
     print("未找到任何有效数据，请检查 base_dir 路径和文件夹格式。")

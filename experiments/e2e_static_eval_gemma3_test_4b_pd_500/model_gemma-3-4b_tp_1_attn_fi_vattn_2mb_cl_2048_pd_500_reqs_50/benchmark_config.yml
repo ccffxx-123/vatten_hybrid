@@ -23,7 +23,7 @@ model_max_model_len: 2048
 model_name: google/gemma-3-4b-it
 model_pipeline_parallel_degree: 1
 model_tensor_parallel_degree: 1
-output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_4b_pd_500/model_gemma-3-4b_tp_1_attn_fi_vattn_2mb_cl_2048_pd_500_reqs_50//
+output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_4b_pd500/model_gemma-3-4b_tp_1_attn_fi_vattn_2mb_cl_2048_pd_500_reqs_50//
 poisson_request_interval_generator_qps: 1.0
 port: 8000
 replica_resource_mapping: ''

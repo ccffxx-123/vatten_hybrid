@@ -27,7 +27,7 @@ high_chunk_size: 2048
 chunk_schedule_max_tokens: 131072
 chunk_schedule_stages: 16
 write_metrics: true
-output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_4b_pd_500/model_gemma-3-4b_tp_1_attn_fi_vattn_2mb_cl_16384_pd_500_reqs_50///replica_0
+output_dir: /workspace/vatten_hybrid/experiments/e2e_static_eval_gemma3_test_4b_pd500/model_gemma-3-4b_tp_1_attn_fi_vattn_2mb_cl_16384_pd_500_reqs_50///replica_0
 wandb_project: ''
 wandb_sweep_id: ''
 wandb_run_id: ''

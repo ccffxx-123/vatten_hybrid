@@ -22,7 +22,7 @@ attention_backends = [
 # QPS (Queries Per Second)：每秒查询率，衡量系统负载压力
 # 测试从低负载 (0.4) 到高负载 (6) 情况下系统的响应能力
 # qps_values = [0.26, 0.34, 0.38]
-qps_values = [0.02, 0.06, 0.10, 0.14, 0.18, 0.22]
+qps_values = [0.02]
 # qps_values = [0.04, 0.08, 0.12, 0.16]
 # qps_values = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6]
 
@@ -72,8 +72,9 @@ for model in models:
                 # 请求生成配置
                 '--request_generator_provider', 'synthetic',
                 '--synthetic_request_generator_length_provider', 'trace', # 关键：长度由数据集轨迹文件决定
-                '--synthetic_request_generator_interval_provider', 'poisson', # 关键：请求按泊松分布随机到达
-                '--poisson_request_interval_generator_qps', f'{qps}', # 设置目标每秒请求数
+                '--synthetic_request_generator_interval_provider', 'static', # 关键：请求按泊松分布随机到达
+                # '--synthetic_request_generator_interval_provider', 'poisson', # 关键：请求按泊松分布随机到达
+                # '--poisson_request_interval_generator_qps', f'{qps}', # 设置目标每秒请求数
                 '--trace_request_length_generator_trace_file', f'{dataset_path}', # 指定轨迹文件
                 
                 # 调度器配置

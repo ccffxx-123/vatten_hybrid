@@ -240,13 +240,14 @@ class BaseLLMEngine:
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
         )
         # exit(0)
-        num_gpu_blocks_across_workers, physical_memory_all = map(list, zip(*output_all))
+        num_gpu_blocks_across_workers, physical_memory_all, cache_block_size_all = map(list, zip(*output_all))
 
         # Since we use a shared centralized controller, we take the minimum
         # number of blocks across all workers to make sure all the memory
         # operators can be applied to all workers.
         num_gpu_blocks = min(num_gpu_blocks_across_workers)
         physical_memory = min(physical_memory_all)
+        cache_block_size = min(cache_block_size_all)
 
         # FIXME(woosuk): Change to debug log.
         logger.info(f"# GPU blocks: {num_gpu_blocks}")
@@ -269,6 +270,7 @@ class BaseLLMEngine:
                 )
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.memory_for_gpu = physical_memory
+        self.cache_config.bytes_per_block = cache_block_size
         # Initialize the cache.
         self._run_workers(
             "init_cache_engine", cache_config=self.cache_config, model_config=self.model_config, get_all_outputs=True

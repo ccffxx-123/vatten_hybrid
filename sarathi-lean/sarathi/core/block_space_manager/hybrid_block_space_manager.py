@@ -565,7 +565,7 @@ class HybridBlockSpaceManager:
     # ------------------------------------------------------------------
     # Scheduler 接口
     # ------------------------------------------------------------------
-
+    
     def can_allocate(self, seq: 'Sequence') -> bool:
         """检查是否有足够空间为 seq 的全部 prompt token 分配 block。"""
         num_needed = self.coordinator.get_num_blocks_to_allocate(

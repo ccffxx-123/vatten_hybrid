@@ -179,6 +179,7 @@ class HybridCacheEngine:
         self.gpu_cache: GroupedCache                          # [group_idx][buf_idx]
         self.layer_to_cache_info: Dict[int, Tuple[int, int]] # layer_idx → (group_idx, buf_idx)
         self.gpu_cache, self.layer_to_cache_info = self._allocate_gpu_cache()
+        self.bytes_per_block = 0
 
     # ------------------------------------------------------------------
     # GPU 张量分配：从 raw int8 buffer 创建各类型的 as_strided 视图

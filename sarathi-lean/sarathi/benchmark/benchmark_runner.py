@@ -70,7 +70,7 @@ class BenchmarkRunner:
             # replica config
             replica_id=replica_id,
             # replica_resource_mapping=replica_resource_mapping,
-            replica_resource_mapping=[("", 0)],
+            # replica_resource_mapping=[("", 0)],
             # replica_resource_mapping=[("", 0), ("", 1)],  # 用 GPU 2 和 GPU 3
             output_dir=output_dir,
             # model config
@@ -157,6 +157,8 @@ class BenchmarkRunner:
         )
         start_time = time.monotonic()
 
+        memory_records = []
+
         # Run the engine.
         while num_processed_requests < len(self._requests):
             elapsed_time = time.monotonic() - start_time
@@ -164,6 +166,16 @@ class BenchmarkRunner:
                 break
 
             step_outputs = self._llm_engine.step()
+
+            # 每 N 步采集一次（避免开销过大）  10
+            if num_steps % 1 == 0:  
+                snapshot = self._llm_engine._run_workers(
+                    "get_memory_snapshot",
+                    get_all_outputs=True,
+                )[0]  # 取 worker 0 的数据
+                snapshot['step'] = num_steps
+                memory_records.append(snapshot)
+
             num_steps += 1
 
             for output in step_outputs:
@@ -176,6 +188,11 @@ class BenchmarkRunner:
         logger.info(
             f"Replica {self._replica_id} exiting after processing {len(self._requests)} ({num_steps} iterations), Total time taken: {end_time - start_time:.2f} seconds"
         )
+
+        output_dir = self._config.output_dir
+        # 保存
+        with open(f"{output_dir}/memory_trace.json", 'w') as f:
+            json.dump(memory_records, f)
 
         if self._config.enable_profiling:
             self._llm_engine.stop_profiling()

@@ -431,10 +431,12 @@ class CacheConfig:
         self.gpu_memory_utilization = gpu_memory_utilization
         self._verify_args()
         self.max_batch_size = max_batch_size
+        
 
         # Will be set after profiling.
         self.num_gpu_blocks = None
         self.memory_for_gpu = None
+        self.bytes_per_block = None
 
     def _verify_args(self) -> None:
         if self.gpu_memory_utilization > 1.0:

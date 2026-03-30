@@ -32,6 +32,15 @@ from sarathi.worker.cache_engine import get_cache_engine
 from sarathi.worker.cache_engine import get_cache_mem_alloc_backend
 from sarathi.model_executor.attention import AttentionBackend
 from sarathi.worker.vattn_state_registry import register_cache_engine
+import math, time
+from sarathi.core.kv_cache_config_builder import build_kv_cache_config
+from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
+from sarathi.core.sequence_manager.hybrid_worker_sequence_manager import (
+    HybridWorkerSequenceManager,
+)
+from sarathi.core.datatypes.kv_cache_spec import (
+    FullAttentionSpec, SlidingWindowSpec, MambaSpec
+)
 
 logger = init_logger(__name__)
 
@@ -139,13 +148,6 @@ class BaseWorker:
         self.cache_config = cache_config
 
         if model_config.is_hybrid_model() and AttentionBackend.is_vLLM_hybird(model_config.attention_backend):
-            # 混合模型路径
-            from sarathi.core.kv_cache_config_builder import build_kv_cache_config
-            from sarathi.worker.cache_engine.hybrid_cache_engine import HybridCacheEngine
-            from sarathi.core.sequence_manager.hybrid_worker_sequence_manager import (
-                HybridWorkerSequenceManager,
-            )
-
             # cache_config.num_gpu_blocks 已由 profile_num_available_blocks 填好
             kv_cache_config = build_kv_cache_config(
                 model_config=self.model_config,
@@ -280,7 +282,7 @@ class BaseWorker:
         self,
         block_size: int,
         gpu_memory_utilization: float,
-    ) -> Tuple[int, int]:
+    ) -> Tuple[int, int, int]:
         return self.model_runner.profile_num_available_blocks(
             block_size, gpu_memory_utilization
         )
@@ -299,6 +301,256 @@ class BaseWorker:
     @synchronized
     def show_allocator_state(self) -> None:
         self.cache_engine.show_allocator_state()
+
+
+    # ============================================================
+    # get_memory_snapshot  —  放入 base_worker.py 的 BaseWorker 类中
+    # ============================================================
+    #
+    # 在文件顶部添加：
+    #   import math, time
+    #   import torch
+    #   from sarathi.model_executor.attention import AttentionBackend
+    #
+    # 调用方式（在 execute_model 或外部）：
+    #   snapshot = worker.get_memory_snapshot()
+    #   snapshot['step'] = current_step
+    # ============================================================
+
+    def get_memory_snapshot(self) -> dict:
+        """
+        返回当前 GPU 内存快照（单位 GB）。
+
+        各字段含义
+        ----------
+        weight_gb       : 模型参数占用
+        reserve_gb      : profile 阶段预留的激活值等（= torch_reserved - weight - kv_pool）
+        kv_used_*       : 理论上当前 KV 实际需要的显存（按 token 数精确计算）
+        wasted_gb       : 已分配 KV block - 理论需要 = 碎片 + 窗口外已分配但无用的 block
+        """
+        GB = 1 << 30   # 2^30 bytes
+
+        snapshot = {
+            'step':      -1,          # 由外部填入
+            'timestamp': time.perf_counter(),
+        }
+
+        # ── 模型权重（只算一次，之后缓存）──────────────────────────────────────
+        if not hasattr(self, '_weight_bytes_cached'):
+            self._weight_bytes_cached = sum(
+                p.nelement() * p.element_size()
+                for p in self.model_runner.model.parameters()
+            )
+        weight_bytes = self._weight_bytes_cached
+        snapshot['weight_gb'] = weight_bytes / GB
+
+        attn_backend = self.model_config.attention_backend
+
+        # 共用辅助：KV 每 token 字节数（不含 block 对齐浪费）
+        head_size  = self.model_config.get_head_size()
+        num_heads  = self.model_config.get_num_kv_heads(self.parallel_config)
+        num_layers = self.model_config.get_num_layers(self.parallel_config)
+        elem_size  = torch.tensor([], dtype=self.model_config.dtype).element_size()
+        sliding_window = self.model_config.get_window_size() 
+        num_full, num_swa, num_mamba = self.model_config.get_num_layers_by_type()
+
+        # 每 token 存 K+V 各一份 —— Full Attention 的基本单价
+        bytes_per_token = 2 * num_heads * head_size * num_layers * elem_size
+        bytes_per_token_full = 2 * num_heads * head_size * num_full * elem_size
+        bytes_per_token_swa = 2 * num_heads * head_size * num_swa * elem_size
+
+        if AttentionBackend.is_vLLM(attn_backend):
+            block_manager = self.seq_manager.block_manager
+            block_size    = self.cache_config.block_size
+            num_total     = self.cache_config.num_gpu_blocks
+            num_allocated = num_total - block_manager.get_num_free_gpu_blocks()   # 已分配给 seq 的 block 数
+            bytes_per_block = block_size * bytes_per_token
+
+            # ── 实际已分配 KV 字节 ────────────────────────────────────────────
+            allocated_bytes = num_allocated * bytes_per_block       
+
+            # ── 理论上当前 KV 实际需要的显存（按 token 数精确计算） ──────
+            theory_bytes = 0
+            for seq_id, block_table in block_manager.block_tables.items():
+                # block_tables 里的 seq 都是正在执行的（waiting 还没分配 block）
+                seq = self.seq_manager.seq_map.get(seq_id)
+                if seq is None:
+                    continue
+                seq_len = seq.get_len()   # prompt + output tokens
+                theory_bytes += seq_len * bytes_per_token_full + min(seq_len, sliding_window) * bytes_per_token_swa
+
+            wasted_bytes = max(allocated_bytes - theory_bytes, 0)
+
+            # ── reserve：profile 阶段为激活值等预留的显存 ────────────────────
+            torch_reserved  = torch.cuda.memory_reserved()
+            # print(f"torch_reserved: {torch_reserved / GB:.2f} GB")
+            reserve_bytes   = max(torch_reserved - weight_bytes - self.cache_engine.cache_config.memory_for_gpu, 0)
+
+            snapshot.update({
+                'type':           'vllm',
+                'weight_gb':      weight_bytes   / GB,
+                'reserve_gb':     reserve_bytes  / GB,
+                'kv_used_gb':     theory_bytes   / GB,
+                'wasted_gb':      wasted_bytes   / GB,
+            })
+
+        elif AttentionBackend.is_vLLM_hybird(attn_backend):
+            from sarathi.core.datatypes.kv_cache_spec import (
+                FullAttentionSpec, SlidingWindowSpec, MambaSpec
+            )
+
+            ce        = self.cache_engine               # HybridCacheEngine
+            kv_config = ce.kv_cache_config
+            groups    = kv_config.kv_cache_groups
+            bm        = self.seq_manager.block_manager  # HybridBlockSpaceManager
+
+            # ── 分组基本参数 ─────────────────────────────────────────────────
+            # group_size = m = raw_buffer 数量 = 每组的层数（含 padding 层）
+            group_size    = ce.group_size              # = len(groups[0].layer_names)
+            num_blocks    = kv_config.num_blocks       # BlockPool 总 block_id 数
+            all_bytes     = ce.cache_config.memory_for_gpu
+            num_allocated = num_blocks - bm.get_num_free_gpu_blocks()
+            cache_block_size = ce.cache_config.bytes_per_block
+
+            # Mamba：找到第一个 MambaSpec，拿 page_size_bytes
+            # page_size_bytes = sum(prod(shape) × dtype_size for each state)
+            # 表示单条 seq、单个 Mamba 层的状态字节数
+            # MambaManager 只保留最后一个 token 的状态（block_id 只有 1 个非 null）
+            # 所以每条 seq 的 Mamba 理论字节 = page_size_bytes × num_mamba
+            mamba_bytes_per_seq = 0
+            for g in groups:
+                if isinstance(g.kv_cache_spec, MambaSpec):
+                    # page_size_bytes 是单层单block的字节，乘以真实 Mamba 层数
+                    mamba_bytes_per_seq = g.kv_cache_spec.page_size_bytes * num_mamba
+                    break
+
+            # ── 按 seq 计算理论 KV 字节 ──────────────────────────────────────
+            # 只遍历 manager-0 的 seq_id（所有 manager 持有相同的 seq_id 集合）
+            manager0 = bm.coordinator.managers[0]
+            theory_full_bytes  = 0
+            theory_swa_bytes   = 0
+            theory_mamba_bytes = 0
+
+            for seq_id in manager0.req_to_blocks:
+                seq = self.seq_manager.seq_map.get(seq_id)
+                if seq is None:
+                    continue
+                seq_len = seq.get_len()
+
+                # Full Attention：全部 token 都需要保留
+                theory_full_bytes += seq_len * bytes_per_token_full
+
+                # Sliding Window：最多保留 sliding_window 个 token
+                swa_len = min(seq_len, sliding_window) if sliding_window > 0 else seq_len
+                theory_swa_bytes += swa_len * bytes_per_token_swa
+
+                # Mamba：固定大小，与 seq_len 无关
+                theory_mamba_bytes += mamba_bytes_per_seq
+
+            # ── 实际已分配字节────────────
+            # 已经分配的block数 * block大小(block_size)
+            allocated_bytes  = num_allocated * cache_block_size
+
+            # ── 浪费 = 实际已分配 - 理论需要 ────────────────────────────────
+            wasted_bytes = allocated_bytes - theory_full_bytes - theory_swa_bytes - theory_mamba_bytes
+
+            # ── reserve：torch 总预留 - 权重 - kv_pool ───────────────────────
+            torch_reserved = torch.cuda.memory_reserved()
+            # print(f"self.cache_engine.memory_for_gpu: {self.cache_engine.cache_config.memory_for_gpu / GB}")
+            reserve_bytes  = max(torch_reserved - weight_bytes - all_bytes, 0)
+
+            snapshot.update({
+                'type':             'vllm_hybrid',
+                'reserve_gb':       reserve_bytes       / GB,
+                'used_full_gb':     theory_full_bytes   / GB,
+                'used_window_gb':   theory_swa_bytes    / GB,
+                'used_state_gb':    theory_mamba_bytes  / GB,
+                'wasted_gb':        wasted_bytes        / GB,
+            })
+
+        elif AttentionBackend.is_vATTN(attn_backend):
+            import vattention
+
+            PAGE_SIZE = 2 << 20   # 2 MB，与 C++ 侧 page_size 一致
+
+            ce = self.cache_engine   # vATTNCacheEngine (hybrid)
+
+            # ── 从 C++ 侧获取已映射物理页数 ────────────────────────────────────
+            # 需要在 vattention.cu 中导出（见下方注释）
+            mapped_trans = vattention.get_mapped_pages_trans()   # List[int]，per reqId
+            mapped_swa   = vattention.get_mapped_pages_swa()     # List[int]，per reqId
+            mapped_state = vattention.get_mapped_pages_state()   # int，总页数（全局水位）
+
+            # Mamba：每条 seq 固定 1 个 page 的状态（C++ 用水位线管理，1 slot = exact_state_size）
+            # exact_state_size_per_req = (conv_elems_per_slot + ssm_elems_per_slot) * elem_size
+            # 这里近似用已映射页数反推
+            hf = self.model_config.hf_config
+            if num_mamba > 0:
+                conv_dim        = getattr(hf, 'mamba_num_heads', 1) * getattr(hf, 'mamba_head_dim', 1) \
+                                + 2 * getattr(hf, 'n_groups', 1) * getattr(hf, 'ssm_state_size', 1)
+                conv_kernel_m1  = getattr(hf, 'conv_kernel', 4) - 1
+                mamba_num_heads = getattr(hf, 'mamba_num_heads', 1)
+                mamba_head_dim  = getattr(hf, 'mamba_head_dim', 1)
+                d_state         = getattr(hf, 'ssm_state_size', 1)
+                n_layers_state  = num_mamba
+                exact_state_per_req = (
+                    conv_dim * conv_kernel_m1 * n_layers_state
+                    + mamba_num_heads * mamba_head_dim * d_state * n_layers_state
+                ) * elem_size
+            else:
+                exact_state_per_req = 0
+
+            theory_trans_bytes  = 0
+            theory_swa_bytes    = 0
+            theory_mamba_bytes  = 0
+
+            for seq_id, req_id in ce.seq_to_batch_idx.items():
+                seq = self.seq_manager.seq_map.get(seq_id)
+                seq_len = ce.curr_seq_lens[req_id]   # C++ 侧维护的最新长度
+                if seq_len == 0:
+                    continue
+
+                if num_full > 0:
+                    theory_trans_bytes += seq_len * bytes_per_token_full
+
+                if num_swa > 0:
+                    effective = min(seq_len, sliding_window) if sliding_window > 0 else seq_len
+                    theory_swa_bytes += effective * bytes_per_token_swa
+
+                if num_mamba > 0:
+                    # Mamba：每条 seq 只有 1 个状态 slot，固定大小
+                    theory_mamba_bytes += exact_state_per_req
+
+            # ── 实际已映射物理页 × PAGE_SIZE ─────────────────────────────────
+            alloc_total  = ((sum(mapped_trans) + sum(mapped_swa)) * 2 + mapped_state) * PAGE_SIZE
+            theory_total = theory_trans_bytes + theory_swa_bytes + theory_mamba_bytes
+
+            # Wasted = 实际已映射 - 理论需要
+            # 来源：① 预取的富余页（后台线程超前分配）；② 历史请求释放但尚未回收的页
+            wasted_bytes = max(alloc_total - theory_total, 0)
+            # print(f"alloc_total: {alloc_total}, theory_total: {theory_total}, wasted_bytes: {wasted_bytes}")
+
+            # reserve：profile 阶段预留（kv pool 是动态的，用总 reserved - weight 近似）
+            torch_reserved = torch.cuda.memory_reserved()
+            # vAttention 的 KV 显存由 CUDA VMM 管理，不在 torch reserved 里
+            # 因此 reserve ≈ torch_reserved - weight - kv_pool
+            reserve_bytes = max(torch_reserved - weight_bytes - ce.cache_mem_size, 0)
+
+            snapshot.update({
+                'type':              'vattn_hybrid',
+                'weight_gb':         weight_bytes         / GB,
+                'reserve_gb':        reserve_bytes        / GB,
+                'used_trans_gb':     theory_trans_bytes   / GB,
+                'used_swa_gb':       theory_swa_bytes     / GB,
+                'used_mamba_gb':     theory_mamba_bytes   / GB,
+                'wasted_gb':         wasted_bytes         / GB,
+            })
+
+        snapshot['step']      = -1   # 由外部填入
+        snapshot['timestamp'] = time.perf_counter()
+        return snapshot
+
+
 
 def _init_distributed_environment(
     parallel_config: ParallelConfig,

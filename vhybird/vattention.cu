@@ -840,6 +840,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("free_batch_idx", &free_batch_idx, "free a request id...");
     m.def("num_free_kvblocks", &num_free_kvblocks, "number of free kv blocks...");
     m.def("get_state_slot_id", &get_state_slot_id, "Get physical slot id for a Mamba request");
+    // 在 PYBIND11_MODULE 中注册
+    m.def("get_mapped_pages_trans", &get_mapped_pages_trans);
+    m.def("get_mapped_pages_swa",   &get_mapped_pages_swa);
+    m.def("get_mapped_pages_state", &get_mapped_pages_state);
 }
 
 

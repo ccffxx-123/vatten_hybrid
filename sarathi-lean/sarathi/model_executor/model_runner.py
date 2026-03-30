@@ -383,7 +383,7 @@ class ModelRunner:
         torch.cuda.empty_cache()
         get_attention_wrapper().end_forward()
         set_random_seed(self.model_config.seed)
-        return num_gpu_blocks, physical_memory
+        return num_gpu_blocks, physical_memory, cache_block_size
         
 
     def run(

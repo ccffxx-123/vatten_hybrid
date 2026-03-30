@@ -75,3 +75,19 @@ u64 num_free_kvblocks() {
 int get_state_slot_id(int reqId) {
     return vattn.get_state_slot_id(reqId);
 }
+
+// 在 apis.h 中添加
+std::vector<u64> get_mapped_pages_trans() {
+    return mapped_pages_trans;
+}
+std::vector<u64> get_mapped_pages_swa() {
+    std::vector<u64> mapped_pages_swa_total;
+    for(int i = 0; i < mapped_pages_swa.size(); i++) {
+        mapped_pages_swa_total.push_back(std::min(mapped_pages_swa[i], virt_buff_size_per_window_size));
+    }
+    return mapped_pages_swa_total;
+}
+u64 get_mapped_pages_state() {
+    return mapped_pages_state_total;
+}
+

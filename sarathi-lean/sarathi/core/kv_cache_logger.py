@@ -110,4 +110,5 @@ class KVCacheLogger:
 
 
 # 全局单例，默认关闭。其他模块直接 import 使用
-kv_logger = KVCacheLogger(default_enable=False)
+# kv_logger = KVCacheLogger(default_enable=False)
+kv_logger = KVCacheLogger(default_enable=True)

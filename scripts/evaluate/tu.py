@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # ================= 配置区域 =================
-base_dir = Path('../../experiments/e2e_static_eval_gemma3_test_4b_pd_500')
-output_dir = Path('test_pic/e2e_static_eval_gemma3_test_4b_pd_500') #vatten_hybird_gemma3_27b
+base_dir = Path('experiments/e2e_static_eval_test_GB_500')
+output_dir = Path('test_pic/e2e_static_eval_test_GB_500') #vatten_hybird_gemma3_27b
 # ===========================================
 
 # 确保输出目录存在

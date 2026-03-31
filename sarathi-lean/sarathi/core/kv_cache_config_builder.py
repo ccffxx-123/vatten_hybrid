@@ -393,13 +393,13 @@ def build_kv_cache_config(
     from collections import Counter
     type_counts = Counter(layer_type_list)
     layer_seq_str = str(layer_type_list[:20]) + ('...' if len(layer_type_list)>20 else '')
-    kv_logger.layout(
-        f"\n{'='*60}\n"
-        f"[KVCacheConfigBuilder] 模型层分析:\n"
-        f"  总层数: {len(layer_type_list)}\n"
-        f"  层类型分布: {dict(type_counts)}\n"
-        f"  层序列 (前20): {layer_seq_str}"
-    )
+    # kv_logger.layout(
+    #     f"\n{'='*60}\n"
+    #     f"[KVCacheConfigBuilder] 模型层分析:\n"
+    #     f"  总层数: {len(layer_type_list)}\n"
+    #     f"  层类型分布: {dict(type_counts)}\n"
+    #     f"  层序列 (前20): {layer_seq_str}"
+    # )
 
     # ── 新增：Case 4 block_size 对齐 ──────────────────────────────────
     # 必须在构建 spec 之前完成，后续所有 spec 都用调整后的 block_size
@@ -407,15 +407,15 @@ def build_kv_cache_config(
         model_config, cache_config, parallel_config, present_types
     )
 
-    # ── 修改：使用 kv_logger.layout 替换 print ──
-    log_msg = (
-        f"\n[KVCacheConfigBuilder] block_size 确定:\n"
-        f"  原始 block_size (from cache_config): {cache_config.block_size}\n"
-        f"  调整后 block_size: {adjusted_block_size}"
-    )
-    if adjusted_block_size != cache_config.block_size:
-        log_msg += "\n  ⚠ Case4: Mamba state_size 大于 Attention page，已放大 block_size"
-    kv_logger.layout(log_msg)
+    # # ── 修改：使用 kv_logger.layout 替换 print ──
+    # log_msg = (
+    #     f"\n[KVCacheConfigBuilder] block_size 确定:\n"
+    #     f"  原始 block_size (from cache_config): {cache_config.block_size}\n"
+    #     f"  调整后 block_size: {adjusted_block_size}"
+    # )
+    # if adjusted_block_size != cache_config.block_size:
+    #     log_msg += "\n  ⚠ Case4: Mamba state_size 大于 Attention page，已放大 block_size"
+    # kv_logger.layout(log_msg)
 
 
     # 替换 dataclasses.replace 的写法
@@ -458,34 +458,34 @@ def build_kv_cache_config(
             )
         layer_names_by_type[layer_type].append(template.format(i=i))
 
-    # ── 修改：打印每种 spec ──
-    spec_log_lines = ["\n[KVCacheConfigBuilder] KVCacheSpec 汇总:"]
-    for layer_type, spec in specs.items():
-        spec_log_lines.append(f"  [{layer_type}] {type(spec).__name__}:")
-        spec_log_lines.append(f"    block_size     = {spec.block_size}")
-        if hasattr(spec, 'num_kv_heads'):
-            spec_log_lines.append(f"    num_kv_heads   = {spec.num_kv_heads}")
-            spec_log_lines.append(f"    head_size      = {spec.head_size}")
-            spec_log_lines.append(f"    dtype          = {spec.dtype}")
-        if hasattr(spec, 'sliding_window'):
-            spec_log_lines.append(f"    sliding_window = {spec.sliding_window}")
-        if hasattr(spec, 'shapes'):
-            spec_log_lines.append(f"    shapes         = {spec.shapes}")
-            spec_log_lines.append(f"    dtypes         = {spec.dtypes}")
-        spec_log_lines.append(f"    page_size      = {spec.page_size_bytes} bytes "
-                              f"= {spec.page_size_bytes/1024:.2f} KB")
-    kv_logger.layout("\n".join(spec_log_lines))
+    # # ── 修改：打印每种 spec ──
+    # spec_log_lines = ["\n[KVCacheConfigBuilder] KVCacheSpec 汇总:"]
+    # for layer_type, spec in specs.items():
+    #     spec_log_lines.append(f"  [{layer_type}] {type(spec).__name__}:")
+    #     spec_log_lines.append(f"    block_size     = {spec.block_size}")
+    #     if hasattr(spec, 'num_kv_heads'):
+    #         spec_log_lines.append(f"    num_kv_heads   = {spec.num_kv_heads}")
+    #         spec_log_lines.append(f"    head_size      = {spec.head_size}")
+    #         spec_log_lines.append(f"    dtype          = {spec.dtype}")
+    #     if hasattr(spec, 'sliding_window'):
+    #         spec_log_lines.append(f"    sliding_window = {spec.sliding_window}")
+    #     if hasattr(spec, 'shapes'):
+    #         spec_log_lines.append(f"    shapes         = {spec.shapes}")
+    #         spec_log_lines.append(f"    dtypes         = {spec.dtypes}")
+    #     spec_log_lines.append(f"    page_size      = {spec.page_size_bytes} bytes "
+    #                           f"= {spec.page_size_bytes/1024:.2f} KB")
+    # kv_logger.layout("\n".join(spec_log_lines))
 
     # Step 4: 计算 group_size（PDF Case 2/3 核心）
     layer_counts = {t: len(layer_names_by_type[t]) for t in specs}
     group_size = _compute_group_size(layer_counts)
 
-    # ── 修改：打印分组算法 ──
-    kv_logger.layout(
-        f"\n[KVCacheConfigBuilder] 分组算法 (对应 PDF Case2/3):\n"
-        f"  各类型层数: {layer_counts}\n"
-        f"  group_size = min({list(layer_counts.values())}) = {group_size}"
-    )
+    # # ── 修改：打印分组算法 ──
+    # kv_logger.layout(
+    #     f"\n[KVCacheConfigBuilder] 分组算法 (对应 PDF Case2/3):\n"
+    #     f"  各类型层数: {layer_counts}\n"
+    #     f"  group_size = min({list(layer_counts.values())}) = {group_size}"
+    # )
 
     # Step 5: 切块 + 补 padding，生成 KVCacheGroupSpec 列表
     # padding_offset 在跨类型循环中累积，确保 "padding.N" 全局唯一
@@ -541,6 +541,6 @@ def build_kv_cache_config(
     group_log_lines.append(f"  num_blocks: {n_blocks}")
     group_log_lines.append(f"{'='*60}")
     
-    kv_logger.layout("\n".join(group_log_lines))
+    # kv_logger.layout("\n".join(group_log_lines))
 
     return KVCacheConfig(num_blocks=n_blocks, kv_cache_groups=kv_cache_groups)

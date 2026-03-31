@@ -6,19 +6,19 @@ import torch
 
 # ================= 1. 核心实验配置 =================
 num_requests = 10      # 每个实验场景下发送的并发请求总数
-gpu_mem_util = 0.80     # GPU 显存占用率阈值（设为 0.9 表示允许模型框架占用 90% 的显存）
+gpu_mem_util = 0.90     # GPU 显存占用率阈值（设为 0.9 表示允许模型框架占用 90% 的显存）
 
 models = {'gemma-3-4b'}
 
 attention_backends = [
-    # 'fi_vattn_2mb', 
-    'fi_paged_hybird_16', 
     # 'fi_paged_16', 
+    'fi_paged_hybird_16', 
+    # 'fi_vattn_2mb', 
 ]
 
 # context_lengths = [32768, 65536, 131072]
 # context_lengths=[2048, 4096, 8192, 16384, 32768, 65536]  # 2048, 4096, 8192, 16384, 131072
-context_lengths=[32890]
+context_lengths=[65536]  # 32890
 # context_lengths=[2048 4096 8192 16384]12
 
 # pd_ratios = [100]

@@ -350,29 +350,29 @@ class HybridCacheEngine:
         raw_size = self.num_gpu_blocks * padded_page_size
 
         # ── 修改：收集并打印 buffer 整体规划 ──
-        plan_log = [
-            f"\n{'='*60}",
-            f"[HybridCacheEngine] GPU 缓冲区规划:",
-            f"  num_blocks (逻辑 block 总数): {self.num_gpu_blocks}",
-            f"  group_size (= m, raw buffer 数量): {m}",
-            f"  num_groups (= n): {len(groups)}",
-            f"\n  各 group 的 page_size:"
-        ]
+        # plan_log = [
+        #     f"\n{'='*60}",
+        #     f"[HybridCacheEngine] GPU 缓冲区规划:",
+        #     f"  num_blocks (逻辑 block 总数): {self.num_gpu_blocks}",
+        #     f"  group_size (= m, raw buffer 数量): {m}",
+        #     f"  num_groups (= n): {len(groups)}",
+        #     f"\n  各 group 的 page_size:"
+        # ]
         for i, g in enumerate(groups):
             ps = g.kv_cache_spec.page_size_bytes
-            plan_log.append(f"    group[{i}] ({type(g.kv_cache_spec).__name__}): "
-                            f"{ps} bytes = {ps/1024:.2f} KB")
+            # plan_log.append(f"    group[{i}] ({type(g.kv_cache_spec).__name__}): "
+            #                 f"{ps} bytes = {ps/1024:.2f} KB")
 
-        plan_log.extend([
-            f"\n  padded_page_size = max(上述) = "
-            f"{padded_page_size} bytes = {padded_page_size/1024:.2f} KB",
-            f"  raw_size (每个 buffer) = num_blocks × padded_page_size = "
-            f"{self.num_gpu_blocks} × {padded_page_size} = "
-            f"{raw_size} bytes = {raw_size/1024/1024:.2f} MB",
-            f"  总 GPU 占用 = m × raw_size = {m} × {raw_size/1024/1024:.2f} MB = "
-            f"{m * raw_size/1024/1024:.2f} MB"
-        ])
-        kv_logger.layout("\n".join(plan_log))
+        # plan_log.extend([
+        #     f"\n  padded_page_size = max(上述) = "
+        #     f"{padded_page_size} bytes = {padded_page_size/1024:.2f} KB",
+        #     f"  raw_size (每个 buffer) = num_blocks × padded_page_size = "
+        #     f"{self.num_gpu_blocks} × {padded_page_size} = "
+        #     f"{raw_size} bytes = {raw_size/1024/1024:.2f} MB",
+        #     f"  总 GPU 占用 = m × raw_size = {m} × {raw_size/1024/1024:.2f} MB = "
+        #     f"{m * raw_size/1024/1024:.2f} MB"
+        # ])
+        # kv_logger.layout("\n".join(plan_log))
 
         raw_buffers: List[torch.Tensor] = [
             torch.zeros(raw_size, dtype=torch.int8, device="cuda")

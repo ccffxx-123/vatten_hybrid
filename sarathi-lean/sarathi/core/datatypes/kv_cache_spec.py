@@ -67,13 +67,13 @@ class FullAttentionSpec(KVCacheSpec):
                   * self.head_size * _dtype_size(self.dtype))
         
         # ── 修改：合并多行 print 为单条 layout 日志 ──
-        kv_logger.layout(
-            f"[FullAttentionSpec] page_size_bytes 计算:\n"
-            f"  公式: 2 × block_size × num_kv_heads × head_size × dtype_size\n"
-            f"  代入: 2 × {self.block_size} × {self.num_kv_heads} × "
-            f"{self.head_size} × {_dtype_size(self.dtype)}\n"
-            f"  结果: {result} bytes = {result/1024:.2f} KB"
-        )
+        # kv_logger.layout(
+        #     f"[FullAttentionSpec] page_size_bytes 计算:\n"
+        #     f"  公式: 2 × block_size × num_kv_heads × head_size × dtype_size\n"
+        #     f"  代入: 2 × {self.block_size} × {self.num_kv_heads} × "
+        #     f"{self.head_size} × {_dtype_size(self.dtype)}\n"
+        #     f"  结果: {result} bytes = {result/1024:.2f} KB"
+        # )
         return result
 
 
@@ -95,14 +95,14 @@ class SlidingWindowSpec(KVCacheSpec):
                   * self.head_size * _dtype_size(self.dtype))
         
         # ── 修改：合并多行 print 为单条 layout 日志 ──
-        kv_logger.layout(
-            f"[SlidingWindowSpec] page_size_bytes 计算:\n"
-            f"  公式: 2 × block_size × num_kv_heads × head_size × dtype_size\n"
-            f"  代入: 2 × {self.block_size} × {self.num_kv_heads} × "
-            f"{self.head_size} × {_dtype_size(self.dtype)}\n"
-            f"  sliding_window: {self.sliding_window}\n"
-            f"  结果: {result} bytes = {result/1024:.2f} KB"
-        )
+        # kv_logger.layout(
+        #     f"[SlidingWindowSpec] page_size_bytes 计算:\n"
+        #     f"  公式: 2 × block_size × num_kv_heads × head_size × dtype_size\n"
+        #     f"  代入: 2 × {self.block_size} × {self.num_kv_heads} × "
+        #     f"{self.head_size} × {_dtype_size(self.dtype)}\n"
+        #     f"  sliding_window: {self.sliding_window}\n"
+        #     f"  结果: {result} bytes = {result/1024:.2f} KB"
+        # )
         return result
 
 
@@ -122,25 +122,25 @@ class MambaSpec(KVCacheSpec):
     @property
     def page_size_bytes(self) -> int:
         # ── 修改：修复 result 未定义的 Bug，并将循环 print 收集为单条 layout 日志 ──
-        log_lines = ["[MambaSpec] page_size_bytes 计算:"]
+        # log_lines = ["[MambaSpec] page_size_bytes 计算:"]
         
         single_token_state_bytes = 0
         for i, (shape, dtype) in enumerate(zip(self.shapes, self.dtypes)):
             state_bytes = prod(shape) * _dtype_size(dtype)
             single_token_state_bytes += state_bytes
-            log_lines.append(
-                f"  state[{i}]: shape={shape}, dtype={dtype}, "
-                f"prod={prod(shape)}, dtype_size={_dtype_size(dtype)}, "
-                f"bytes={state_bytes}"
-            )
+            # log_lines.append(
+            #     f"  state[{i}]: shape={shape}, dtype={dtype}, "
+            #     f"prod={prod(shape)}, dtype_size={_dtype_size(dtype)}, "
+            #     f"bytes={state_bytes}"
+            # )
             
         # 假设 Mamba 的 block 同样是存储 block_size 个 token 的状态
         # result = single_token_state_bytes * self.block_size
         result = single_token_state_bytes
 
-        log_lines.append(f"  结果: {result} bytes = {result/1024:.2f} KB")
+        # log_lines.append(f"  结果: {result} bytes = {result/1024:.2f} KB")
         
-        kv_logger.layout("\n".join(log_lines))
+        # kv_logger.layout("\n".join(log_lines))
         return result
 
 

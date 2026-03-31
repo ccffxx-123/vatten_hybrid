@@ -361,11 +361,11 @@ class MambaWrapper(BaseMambaWrapper):
             conv_state = conv_state_cache[block_id].clone()  # (d_inner, d_conv-1)
             ssm_state  = ssm_state_cache[block_id].clone()   # (d_inner, d_state)
 
-            kv_logger.alloc_debug(
-                f"[MambaWrapper] layer={layer_id}, req=..., "
-                f"{'prefill' if is_prefill else 'decode'}, "
-                f"seq_len={seq_len}, block_id={block_id}"
-            )
+            # kv_logger.alloc_debug(
+            #     f"[MambaWrapper] layer={layer_id}, req=..., "
+            #     f"{'prefill' if is_prefill else 'decode'}, "
+            #     f"seq_len={seq_len}, block_id={block_id}"
+            # )
 
             # ── Prefill 路径 ──────────────────────────────────────────
             if is_prefill:
